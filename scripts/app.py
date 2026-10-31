@@ -640,7 +640,8 @@ $('godl').onclick=()=>start('delogo',{source:$('url').value.trim()||source,metho
 $('cancel').onclick=()=>fetch('/api/jobs/'+cur+'/cancel',{method:'POST',body:'{}'});
 function poll(){clearTimeout(timer);if(!cur)return;fetch('/api/jobs/'+cur).then(r=>r.json()).then(v=>{render(v);if(v.status==='running'||v.status==='queued')timer=setTimeout(poll,1500);else hist()})}
 function render(v){const lab={queued:'En attente',running:'En cours…',done:'Terminé',error:'Erreur',cancelled:'Annulé'}[v.status]||v.status;
- $('status').innerHTML='<span class="st '+v.status+'">'+lab+'</span> '+esc(v.id);const l=$('log');l.textContent=v.log;l.scrollTop=l.scrollHeight;
+ const errl=(v.log.split('\n').filter(x=>x.startsWith('[erreur]')).pop()||'');
+ $('status').innerHTML='<span class="st '+v.status+'">'+lab+'</span> '+esc(v.id)+(v.status==='error'&&errl?'<br><b style="color:var(--er)">'+esc(errl)+'</b>':'');const l=$('log');l.textContent=v.log;l.scrollTop=l.scrollHeight;
  if(v.status!=='running'&&v.status!=='queued')$('cancel').classList.add('hide');
  const mp=v.outputs.filter(o=>o.type==='mp4'),oth=v.outputs.filter(o=>o.type!=='mp4'&&o.type!=='jpg');
  $('out').innerHTML=mp.map(o=>'<div class="v"><video controls preload="metadata" src="/files/'+v.id+'/'+encodeURI(o.path)+'"></video><div class="note">'+esc(o.name)+' · '+(o.size/1048576).toFixed(1)+' Mo</div><a href="/files/'+v.id+'/'+encodeURI(o.path)+'?dl=1">Télécharger</a>'+(v.kind==='clips'?' · <a href="#" class="enh" data-s="job:'+v.id+'/'+encodeURI(o.path)+'">Améliorer ce clip</a>':'')+'</div>').join('')

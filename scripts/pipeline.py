@@ -148,6 +148,7 @@ def main() -> None:
     args = ap.parse_args()
 
     started = time.time()
+    source_title = ""
     try:
         if args.dub and not args.translate_to:
             raise StudioError("--dub demande --translate-to <langue>.")
@@ -160,12 +161,21 @@ def main() -> None:
             meta = fetch.download(args.input, str(out_dir / "source"), args.max_height, args.cookies_from_browser)
             print(f"      {meta['title']} — {meta['width']}x{meta['height']}, {meta['duration']:.0f}s", file=sys.stderr)
             args.input = meta["path"]
+            source_title = meta.get("title") or ""
         info = probe(args.input)
+        source_title = source_title or Path(args.input).stem
         tw, th = out_size_for(args.aspect)
         print(f"Source : {info.width}x{info.height} @ {info.fps:.0f} fps, {fmt_dur(info.duration)} · "
               f"sortie {tw}x{th} ({args.quality})", file=sys.stderr)
 
         transcript = get_transcript(args, out_dir)
+        speechless = highlights.word_count(transcript) < 8
+        if speechless:
+            print("[info] aucune parole détectée (musique, sport, ambiance…) : les moments forts sont choisis d'après le "
+                  "son et le mouvement. Pas de sous-titres, de traduction ni de doublage pour cette vidéo.", file=sys.stderr)
+            if args.translate_to or args.dub:
+                print("[info] --translate-to / --dub ignorés (rien à traduire).", file=sys.stderr)
+            args.translate_to, args.dub, args.tighten, args.no_captions = None, False, False, True
 
         if args.clips_file:
             clips = normalize_clips(load_json(args.clips_file)["clips"], info.duration)
@@ -175,8 +185,12 @@ def main() -> None:
             extra = set()
             if args.lexicon:
                 extra = {x.strip().lower() for x in Path(args.lexicon).read_text(encoding="utf-8").splitlines() if x.strip()}
-            clips = highlights.find_clips(transcript, args.clips, args.min_len, args.max_len, args.target, extra,
-                                          args.input, 2.0, 0.2, 0.4, info.duration)
+            if speechless:
+                clips = highlights.find_visual_clips(args.input, args.clips, args.min_len, args.max_len, args.target,
+                                                     info.duration, source_title)
+            else:
+                clips = highlights.find_clips(transcript, args.clips, args.min_len, args.max_len, args.target, extra,
+                                              args.input, 2.0, 0.2, 0.4, info.duration)
             save_json(out_dir / "clips.json", {"source": args.input, "language": transcript.get("language"), "clips": clips})
         for c in clips:
             print(f"   #{c['id']:<2} {fmt_dur(c['start'])}–{fmt_dur(c['end'])} ({c['duration']:.0f}s) "
@@ -197,9 +211,15 @@ def main() -> None:
                         "end": clip["end"], "score": clip.get("score")}
             try:
                 work_src, work_clip, work_tr = args.input, clip, transcript
+                res = None
                 if args.tighten:
-                    res = polish.tighten_clip(args.input, transcript, clip["start"], clip["end"],
-                                              str(prefix) + ".tight.mp4", max_gap=args.max_gap)
+                    try:
+                        res = polish.tighten_clip(args.input, transcript, clip["start"], clip["end"],
+                                                  str(prefix) + ".tight.mp4", max_gap=args.max_gap)
+                    except StudioError as exc:
+                        print(f"   [info] resserrage ignoré : {exc}", file=sys.stderr)
+                        base_row["warning"] = f"resserrage ignoré : {exc}"
+                if res is not None:
                     save_json(str(prefix) + ".tight.transcript.json", res["transcript"])
                     work_src, work_tr = str(prefix) + ".tight.mp4", res["transcript"]
                     work_clip = {**clip, "start": 0.0, "end": round(res["duration"], 3),

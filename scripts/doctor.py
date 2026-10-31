@@ -59,8 +59,8 @@ def main() -> int:
     module("edge_tts", "edge-tts", required=False)
     try:
         import torch
-        cpu = "+cpu" in torch.__version__ or not torch.cuda.is_available()
-        line(OK, f"torch {torch.__version__}" + (" (CPU)" if cpu else " (GPU)"))
+        gpu = torch.cuda.is_available()
+        line(OK, f"torch {torch.__version__}" + (" (GPU CUDA utilisable)" if gpu else " (calcul sur CPU)"))
     except Exception:  # noqa: BLE001
         line(WARN, "torch absent (utile à la traduction hors-ligne)",
              "pip install torch --index-url https://download.pytorch.org/whl/cpu")

@@ -217,6 +217,14 @@ def find_clips(transcript: dict, count: int, min_len: float, max_len: float, tar
                extra_power: set[str], media: str | None, gap: float, pad_before: float, pad_after: float,
                total_duration: float | None) -> list[dict]:
     units = build_units(transcript)
+    if total_duration and total_duration <= min_len:
+        # source plus courte que le minimum demandé : on garde la vidéo entière plutôt que d'échouer
+        text = " ".join(u.text for u in units)
+        print(f"[info] vidéo de {total_duration:.0f}s plus courte que le minimum ({min_len:.0f}s) : clip unique = vidéo entière.",
+              file=sys.stderr)
+        return [{"id": 1, "start": 0.0, "end": round(total_duration, 2), "duration": round(total_duration, 2),
+                 "score": 0.0, "title": make_title(units[0].text) if units else "Vidéo complète",
+                 "hook": units[0].text if units else "", "reasons": ["vidéo plus courte que le minimum"], "text": text}]
     energy = None
     global_energy = None
     if media:
@@ -227,16 +235,32 @@ def find_clips(transcript: dict, count: int, min_len: float, max_len: float, tar
         except Exception as exc:  # noqa: BLE001 - l'énergie est un bonus, jamais bloquant
             print(f"[avertissement] énergie audio ignorée : {exc}", file=sys.stderr)
 
-    candidates = []
-    for i in range(len(units)):
-        for j in range(i, len(units)):
-            dur = units[j].end - units[i].start
-            if dur > max_len:
-                break
-            if dur < min_len:
-                continue
-            s, reasons = score_window(units, i, j, target, extra_power, energy, global_energy)
-            candidates.append((s, i, j, reasons))
+    def gather(lo: float) -> list:
+        found = []
+        for i in range(len(units)):
+            for j in range(i, len(units)):
+                dur = units[j].end - units[i].start
+                if dur > max_len:
+                    break
+                if dur < lo:
+                    continue
+                s, reasons = score_window(units, i, j, target, extra_power, energy, global_energy)
+                found.append((s, i, j, reasons))
+        return found
+
+    candidates = gather(min_len)
+    for factor in (0.75, 0.55, 0.35):  # peu de parole : on assouplit la durée minimale au lieu d'échouer
+        if candidates:
+            break
+        lo = max(12.0, min_len * factor)
+        candidates = gather(lo)
+        if candidates:
+            print(f"[info] pas assez de parole pour {min_len:.0f}s : durée minimale abaissée à {lo:.0f}s.", file=sys.stderr)
+    if not candidates and total_duration and total_duration <= max_len * 1.5:
+        print("[info] sélection impossible par la parole : clip unique = vidéo entière.", file=sys.stderr)
+        return [{"id": 1, "start": 0.0, "end": round(total_duration, 2), "duration": round(total_duration, 2),
+                 "score": 0.0, "title": make_title(units[0].text) if units else "Vidéo complète",
+                 "hook": "", "reasons": ["repli : vidéo entière"], "text": " ".join(u.text for u in units)}]
     if not candidates:
         raise StudioError(
             f"Aucune fenêtre de {min_len:.0f}-{max_len:.0f}s trouvée. Réduis --min ou augmente --max, "
@@ -276,6 +300,90 @@ def find_clips(transcript: dict, count: int, min_len: float, max_len: float, tar
             "reasons": reasons,
             "text": text,
         })
+    return clips
+
+
+def word_count(transcript: dict) -> int:
+    return sum(len(seg.get("words") or []) for seg in transcript.get("segments", []))
+
+
+def motion_profile(media: str, total: float, rate: int = 4):
+    """Mouvement moyen par seconde (différence entre images réduites) : repère l'action visuelle."""
+    import numpy as np
+    side = 48
+    proc = subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-i", media, "-an", "-vf",
+         f"fps={rate},scale={side}:{side},format=gray", "-f", "rawvideo", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    frames = np.frombuffer(proc.stdout, dtype=np.uint8)
+    n = len(frames) // (side * side)
+    if proc.returncode != 0 or n < rate * 2:
+        return None
+    frames = frames[: n * side * side].reshape(n, side * side).astype(np.float32)
+    diff = np.abs(np.diff(frames, axis=0)).mean(axis=1)
+    secs = int(total)
+    out = np.zeros(max(secs, 1), np.float32)
+    for t in range(secs):
+        seg = diff[t * rate:(t + 1) * rate]
+        if seg.size:
+            out[t] = float(seg.mean())
+    return out
+
+
+def _z(x):
+    import numpy as np
+    sd = float(x.std())
+    return (x - float(x.mean())) / sd if sd > 1e-9 else x * 0.0
+
+
+def find_visual_clips(media: str, count: int, min_len: float, max_len: float, target: float, total: float,
+                      title_hint: str = "", gap: float = 2.0) -> list[dict]:
+    """Choix des moments forts SANS parole : pics de volume (musique, public, impacts) + mouvement visuel."""
+    import numpy as np
+    secs = int(total)
+    sig = []
+    reasons_by = []
+    en = audio_energy(media, 1.0)
+    if en is not None:
+        a = np.log(en[0][:secs] + 1e-4)
+        a = np.pad(a, (0, max(0, secs - len(a))), mode="edge")
+        sig.append((0.5, _z(a)))
+        reasons_by.append("énergie sonore")
+    mo = motion_profile(media, total)
+    if mo is not None:
+        mo = np.pad(mo[:secs], (0, max(0, secs - len(mo))), mode="edge")
+        sig.append((0.5, _z(mo)))
+        reasons_by.append("mouvement visuel")
+    if not sig:
+        raise StudioError("Impossible d'analyser le son ni l'image de cette vidéo.")
+    wsum = sum(w for w, _ in sig)
+    score = sum(w * z for w, z in sig) / wsum
+    length = int(min(total, max(min_len, min(max_len, target))))
+    if total <= min_len or length >= secs - 1:
+        print(f"[info] vidéo de {total:.0f}s : clip unique = vidéo entière.", file=sys.stderr)
+        return [{"id": 1, "start": 0.0, "end": round(total, 2), "duration": round(total, 2), "score": 0.0,
+                 "title": title_hint or "Vidéo complète", "hook": "", "reasons": ["vidéo courte : entière"], "text": ""}]
+    cs = np.concatenate([[0.0], np.cumsum(score)])
+    cands = []
+    for a0 in range(0, secs - length + 1):
+        mean = (cs[a0 + length] - cs[a0]) / length
+        hook = (cs[a0 + min(3, length)] - cs[a0]) / min(3, length)  # début fort = bonne accroche
+        cands.append((float(mean + 0.35 * hook), a0))
+    cands.sort(reverse=True)
+    chosen: list[tuple[float, int]] = []
+    for sc, a0 in cands:
+        if all(a0 + length + gap <= b or a0 >= b + length + gap for _, b in chosen):
+            chosen.append((sc, a0))
+        if len(chosen) >= count:
+            break
+    if len(chosen) < count:
+        print(f"[info] {len(chosen)} clip(s) sans chevauchement possible sur {total:.0f}s (demandé : {count}).", file=sys.stderr)
+    clips = []
+    for n, (sc, a0) in enumerate(chosen, 1):
+        clips.append({"id": n, "start": float(a0), "end": float(a0 + length), "duration": float(length),
+                      "score": round(50 + 15 * sc, 1),
+                      "title": f"{title_hint[:48]} — moment {n}" if title_hint else f"Moment fort {n}",
+                      "hook": "", "reasons": ["sans parole : " + " + ".join(reasons_by)], "text": ""})
     return clips
 
 
