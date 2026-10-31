@@ -1,0 +1,13 @@
+# Phenix-video — dépendances Python (toutes libres et gratuites)
+# FFmpeg est requis séparément (https://ffmpeg.org/download.html).
+numpy
+yt-dlp                      # téléchargement par lien (YouTube, TikTok, Instagram…)
+opencv-python-headless      # recadrage, détection de visages (YuNet)
+faster-whisper              # transcription locale mot à mot
+argostranslate              # traduction hors-ligne (EN<->FR et ~30 langues)
+piper-tts                   # voix off hors-ligne (voix libres rhasspy/piper-voices)
+edge-tts                    # optionnel : voix neuronales gratuites (en ligne, service non officiel)
+# demucs                    # optionnel : retire la voix d'origine en gardant la musique (gros)
+mediapipe                   # remplacement d'arrière-plan (modèle de 250 Ko téléchargé au 1er usage)
+# google-api-python-client    # optionnel : envoi direct sur YouTube (youtube_upload.py)
+# google-auth-oauthlib        # optionnel : idem

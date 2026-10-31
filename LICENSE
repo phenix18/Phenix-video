@@ -1,0 +1,8 @@
+Copyright (c) 2026 Phenix - kcw. Tous droits réservés. / All rights reserved.
+
+Phenix-video est un logiciel propriétaire. Aucune autorisation de copier, modifier, distribuer ou
+sous-licencier n'est accordée sans l'accord écrit préalable du titulaire des droits (Phenix - kcw).
+
+Composants tiers : ce logiciel appelle FFmpeg et utilise des bibliothèques libres (faster-whisper,
+argostranslate, piper-tts, OpenCV, MediaPipe, yt-dlp, etc.) qui restent soumises à leurs propres licences ;
+voir NOTICE.md. Le titulaire peut remplacer ce fichier par une licence libre s'il le décide.
