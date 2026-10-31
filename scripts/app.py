@@ -14,8 +14,11 @@ import argparse
 import json
 import mimetypes
 import os
+import hmac
 import re
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -30,6 +33,43 @@ from urllib.parse import parse_qs, unquote, urlparse
 HERE = Path(__file__).resolve().parent
 MAX_UPLOAD = 8 * 1024 ** 3  # 8 Go
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+# Mode réseau local (--lan) : accès depuis un téléphone du même Wi-Fi, protégé par un code PIN.
+LAN = False
+PIN = ""
+TOKENS: set[str] = set()
+FAILS: dict[str, tuple[int, float]] = {}  # ip -> (échecs, bloqué jusqu'à)
+
+MANIFEST = json.dumps({"name": "Phenix-video", "short_name": "Phenix", "start_url": "/", "display": "standalone",
+                       "background_color": "#0f1115", "theme_color": "#f5b301",
+                       "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]})
+ICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#0f1115"/>'
+        '<polygon points="22,48 20,14 40,30" fill="#f5b301"/><polygon points="78,48 80,14 60,30" fill="#f5b301"/>'
+        '<ellipse cx="50" cy="52" rx="28" ry="26" fill="#2e2622" stroke="#f5b301" stroke-width="3"/>'
+        '<polygon points="38,56 62,56 56,74 44,74" fill="#f0e1cd"/><polygon points="45,56 55,56 50,63" fill="#181212"/>'
+        '<circle cx="39" cy="44" r="6" fill="#fff"/><circle cx="61" cy="44" r="6" fill="#fff"/>'
+        '<circle cx="40" cy="45" r="3" fill="#181212"/><circle cx="62" cy="45" r="3" fill="#181212"/></svg>')
+SW = "self.addEventListener('fetch',()=>{});"  # service worker minimal : rend l'application installable
+LOGIN = ('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+         '<title>Phenix-video</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#f5b301">'
+         '<style>body{margin:0;background:#0f1115;color:#e8eaf0;font:16px system-ui;display:grid;place-items:center;min-height:100vh}'
+         'form{background:#181b22;border:1px solid #2a2f3a;border-radius:14px;padding:24px;width:min(320px,90vw);text-align:center}'
+         'input{width:100%;padding:12px;border-radius:8px;border:1px solid #2a2f3a;background:#0f1218;color:#fff;font-size:22px;'
+         'text-align:center;letter-spacing:.3em;box-sizing:border-box}button{margin-top:14px;width:100%;padding:12px;border:0;'
+         'border-radius:8px;background:#f5b301;font-weight:700;font-size:16px}p{color:#8b93a7;font-size:13px}#e{color:#ff5d5d}</style></head>'
+         '<body><form id="f"><h2>Phenix-video</h2><p>Entre le code affiché sur l\'ordinateur</p>'
+         '<input id="p" inputmode="numeric" autocomplete="one-time-code" maxlength="12" autofocus><button>Entrer</button><p id="e"></p></form>'
+         '<script>f.onsubmit=async e=>{e.preventDefault();const r=await fetch("/api/login",{method:"POST",body:JSON.stringify({pin:p.value})});'
+         'if(r.ok)location.reload();else{const j=await r.json().catch(()=>({}));document.getElementById("e").textContent=j.error||"Code incorrect"}}</script>'
+         '</body></html>')
+
+
+def local_ip() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+            sk.connect(("10.255.255.255", 1))  # aucun paquet envoyé : sert à connaître l'interface sortante
+            return sk.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
 
 # --------------------------------------------------------------------------- jobs
 JOBS: dict[str, dict] = {}
@@ -248,7 +288,58 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # -- utilitaires
+    def _authed(self) -> bool:
+        if not LAN:
+            return True
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "pv_auth" and v in TOKENS:
+                return True
+        return False
+
+    def _login(self) -> None:
+        ip = self.client_address[0]
+        fails, until = FAILS.get(ip, (0, 0.0))
+        if time.time() < until:
+            return self._err(429, f"Trop d'essais : attends {int(until - time.time())} s.")
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            pin = str(json.loads(self.rfile.read(min(n, 1024)) or b"{}").get("pin", "")).strip()
+        except (ValueError, TypeError):
+            pin = ""
+        if PIN and hmac.compare_digest(pin.encode(), PIN.encode()):
+            FAILS.pop(ip, None)
+            token = secrets.token_hex(16)
+            TOKENS.add(token)
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", f"pv_auth={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        fails += 1
+        FAILS[ip] = (fails, time.time() + 60 if fails >= 5 else 0.0)
+        self._err(401, "Code incorrect.")
+
+    def _static(self, path: str) -> bool:
+        files = {"/manifest.webmanifest": ("application/manifest+json", MANIFEST), "/icon.svg": ("image/svg+xml", ICON),
+                 "/sw.js": ("application/javascript", SW)}
+        if path not in files:
+            return False
+        ctype, text = files[path]
+        body = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
     def _host_ok(self) -> bool:
+        if LAN:  # l'accès est contrôlé par le code PIN, pas par le nom d'hôte
+            return True
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0] if not (self.headers.get("Host") or "").startswith("[") \
             else (self.headers.get("Host") or "").split("]")[0] + "]"
         return host in ALLOWED_HOSTS
@@ -271,6 +362,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(403, "Hôte refusé.")
         url = urlparse(self.path)
         path = unquote(url.path)
+        if self._static(path):
+            return
+        if not self._authed():
+            if path == "/":
+                body = LOGIN.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            return self._err(401, "Non autorisé.")
         if path == "/":
             body = PAGE.encode("utf-8")
             self.send_response(200)
@@ -295,6 +398,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(403, "Hôte refusé.")
         url = urlparse(self.path)
         path = url.path
+        if path == "/api/login" and LAN:
+            return self._login()
+        if not self._authed():
+            return self._err(401, "Non autorisé.")
         try:
             if path == "/api/upload":
                 return self._upload(parse_qs(url.query).get("name", ["video"])[0])
@@ -387,6 +494,7 @@ class Handler(BaseHTTPRequestHandler):
 PAGE = r"""<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Phenix-video</title>
+<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#f5b301">
 <style>
 :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--tx:#e8eaf0;--mut:#8b93a7;--ac:#f5b301;--ok:#3ecf8e;--er:#ff5d5d}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
@@ -545,6 +653,7 @@ function render(v){const lab={queued:'En attente',running:'En cours…',done:'Te
 function hist(){fetch('/api/history').then(r=>r.json()).then(h=>{$('hist').innerHTML=h.length?h.map(x=>'<a href="#" data-id="'+x.id+'" style="color:var(--ac)">'+x.id+'</a> · '+x.status).join('<br>'):'Aucun travail.';
  document.querySelectorAll('#hist a').forEach(a=>a.onclick=e=>{e.preventDefault();cur=a.dataset.id;$('log').classList.remove('hide');poll()})})}
 hist();
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
 </script></body></html>
 """
 
@@ -555,14 +664,22 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--workdir", default=str(WORKDIR), help="dossier des fichiers envoyés et des résultats")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--lan", action="store_true", help="accès depuis un téléphone du même Wi-Fi (protégé par un code PIN)")
+    ap.add_argument("--pin", default=None, help="avec --lan : code à utiliser (sinon 6 chiffres au hasard)")
     args = ap.parse_args()
+    global LAN, PIN
     WORKDIR = Path(args.workdir).expanduser().resolve()
+    if args.lan:
+        LAN = True
+        PIN = args.pin or f"{secrets.randbelow(10 ** 6):06d}"
+        if len(PIN) < 4:
+            sys.exit("[erreur] --pin : 4 caractères minimum.")
     (WORKDIR / "jobs").mkdir(parents=True, exist_ok=True)
     (WORKDIR / "uploads").mkdir(parents=True, exist_ok=True)
     srv, port = None, args.port
     for candidate in range(args.port, args.port + 20):  # port occupé (appli déjà lancée ?) : on prend le suivant
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+            srv = ThreadingHTTPServer(("0.0.0.0" if LAN else "127.0.0.1", candidate), Handler)
             port = candidate
             break
         except OSError:
@@ -573,7 +690,10 @@ def main() -> None:
         print(f"[info] port {args.port} occupé (l'application tourne peut-être déjà) : utilisation du port {port}.")
     url = f"http://127.0.0.1:{port}"
     print(f"Phenix-video : {url}\nDossier de travail : {WORKDIR}\nCtrl+C pour arrêter.")
-    if not args.no_browser:
+    if LAN:
+        print(f"\nTéléphone (même Wi-Fi) : http://{local_ip()}:{port}\nCode PIN : {PIN}\n"
+              "Ce mode n'est pas chiffré (HTTP) : à utiliser seulement sur un réseau de confiance.")
+    if not args.no_browser and not LAN:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()

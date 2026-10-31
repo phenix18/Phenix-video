@@ -16,6 +16,10 @@ git clone https://github.com/phenix18/phenix-video.git && cd phenix-video
 ```
 Windows natif : `INSTALLER_WINDOWS.bat` puis `LANCER_WINDOWS.bat`.
 
+## Windows (.exe) et Android
+- Windows : `PhenixVideo.exe` (construit par GitHub Actions) ou `INSTALLER_WINDOWS.bat` — `docs/WINDOWS.md`.
+- Android : le téléphone sert d'écran, le PC fait le travail : `./phenix app --lan` puis « Ajouter à l'écran d'accueil » — `docs/ANDROID.md`.
+
 ## En ligne de commande
 ```bash
 ./phenix clips video.mp4 -o out --stop-after clips
