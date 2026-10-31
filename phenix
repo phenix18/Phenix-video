@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Phenix-video — © 2026 Phenix - kcw. Lanceur unique : ./phenix <commande> [options]
+set -e
+cd "$(dirname "$0")"
+[ -d .venv ] && . .venv/bin/activate
+PY=python3; command -v python >/dev/null && PY=python
+case "${1:-help}" in
+  app)      shift; exec $PY scripts/app.py "$@" ;;
+  doctor)   exec $PY scripts/doctor.py ;;
+  clips)    shift; exec $PY scripts/pipeline.py "$@" ;;          # ./phenix clips video.mp4 -o out --stop-after clips
+  enhance)  shift; exec $PY scripts/enhance.py "$@" ;;
+  publish)  shift; exec $PY scripts/publish.py "$@" ;;
+  edit)     shift; exec $PY scripts/edit.py "$@" ;;
+  fx)       shift; exec $PY scripts/fx.py "$@" ;;
+  update)   exec ./update.sh ;;
+  version)  cat VERSION ;;
+  *) cat <<'TXT'
+Phenix-video — commandes :
+  ./phenix app [--port 9000] [--no-browser]   interface web locale (http://127.0.0.1:8765)
+  ./phenix doctor                              diagnostic de l'installation
+  ./phenix clips VIDEO|LIEN -o DOSSIER ...     clips, traduction, doublage (--help pour les options)
+  ./phenix enhance CLIP -o SORTIE ...          nettoyage, fond, effets, mascotte, stickers
+  ./phenix publish DOSSIER                     dossier prêt à publier (YouTube / TikTok)
+  ./phenix edit|fx ...                         outils de montage
+  ./phenix update                              mise à jour depuis GitHub
+TXT
+  ;;
+esac

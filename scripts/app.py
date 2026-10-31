@@ -559,11 +559,19 @@ def main() -> None:
     WORKDIR = Path(args.workdir).expanduser().resolve()
     (WORKDIR / "jobs").mkdir(parents=True, exist_ok=True)
     (WORKDIR / "uploads").mkdir(parents=True, exist_ok=True)
-    try:
-        srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    except OSError as exc:
-        sys.exit(f"[erreur] port {args.port} indisponible ({exc}). Essaie --port 9000.")
-    url = f"http://127.0.0.1:{args.port}"
+    srv, port = None, args.port
+    for candidate in range(args.port, args.port + 20):  # port occupé (appli déjà lancée ?) : on prend le suivant
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+            port = candidate
+            break
+        except OSError:
+            continue
+    if srv is None:
+        sys.exit(f"[erreur] aucun port libre entre {args.port} et {args.port + 19}. Essaie --port 9000.")
+    if port != args.port:
+        print(f"[info] port {args.port} occupé (l'application tourne peut-être déjà) : utilisation du port {port}.")
+    url = f"http://127.0.0.1:{port}"
     print(f"Phenix-video : {url}\nDossier de travail : {WORKDIR}\nCtrl+C pour arrêter.")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
