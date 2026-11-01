@@ -634,6 +634,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
 <footer style="text-align:center;color:var(--mut);font-size:12px;padding:18px">Phenix-video · © 2026 Phenix - kcw</footer>
 <script>
 const $=id=>document.getElementById(id);let source="",cur=null,timer=null,kind="clips";
+const enc=p=>String(p).split('/').map(encodeURIComponent).join('/');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 fetch('/api/health').then(r=>r.json()).then(h=>{$('health').textContent=(h.ffmpeg?'FFmpeg ✓':'⚠ FFmpeg introuvable')+' · dossier : '+h.workdir});
 function tab(n){kind=['','clips','delogo','enhance','trends'][n];['p1','p2','p3','p4'].forEach((id,i)=>$(id).classList.toggle('hide',n!=i+1));$('srcbox').classList.toggle('hide',n==4)}
@@ -679,13 +680,13 @@ function render(v){const lab={queued:'En attente',running:'En cours…',done:'Te
  $('status').innerHTML='<span class="st '+v.status+'">'+lab+'</span> '+esc(v.id)+(v.status==='error'&&errl?'<br><b style="color:var(--er)">'+esc(errl)+'</b>':'');const l=$('log');l.textContent=v.log;l.scrollTop=l.scrollHeight;
  if(v.status!=='running'&&v.status!=='queued')$('cancel').classList.add('hide');
  const mp=v.outputs.filter(o=>o.type==='mp4'),oth=v.outputs.filter(o=>o.type!=='mp4'&&o.type!=='jpg');
- $('out').innerHTML=mp.map(o=>'<div class="v"><video controls preload="metadata" src="/files/'+v.id+'/'+encodeURI(o.path)+'"></video><div class="note">'+esc(o.name)+' · '+(o.size/1048576).toFixed(1)+' Mo</div><a href="/files/'+v.id+'/'+encodeURI(o.path)+'?dl=1">Télécharger</a>'+(v.kind==='clips'?' · <a href="#" class="enh" data-s="job:'+v.id+'/'+encodeURI(o.path)+'">Améliorer ce clip</a>':'')+'</div>').join('')
- +oth.map(o=>'<div class="v"><a href="/files/'+v.id+'/'+encodeURI(o.path)+'" target="_blank">'+esc(o.name)+'</a></div>').join('');
+ $('out').innerHTML=mp.map(o=>'<div class="v"><video controls preload="metadata" src="/files/'+v.id+'/'+enc(o.path)+'"></video><div class="note">'+esc(o.name)+' · '+(o.size/1048576).toFixed(1)+' Mo</div><a href="/files/'+v.id+'/'+enc(o.path)+'?dl=1">Télécharger</a>'+(v.kind==='clips'?' · <a href="#" class="enh" data-s="job:'+v.id+'/'+enc(o.path)+'">Améliorer ce clip</a>':'')+'</div>').join('')
+ +oth.map(o=>'<div class="v"><a href="/files/'+v.id+'/'+enc(o.path)+'" target="_blank">'+esc(o.name)+'</a></div>').join('');
  $('pub').classList.toggle('hide',!(v.status==='done'&&v.kind==='clips'&&mp.length));
  $('ai').classList.toggle('hide',!(mp.length&&v.kind==='clips'&&$('dub').checked&&$('to').value));
  if(v.kind==='trends'&&v.status==='done'){const f=v.outputs.find(o=>o.name==='TENDANCES.md'),g=v.outputs.find(o=>o.name==='idees.md');
-  if(f)Promise.all([fetch('/files/'+v.id+'/'+encodeURI(f.path)).then(r=>r.text()),g?fetch('/files/'+v.id+'/'+encodeURI(g.path)).then(r=>r.text()):''] ).then(([x,y])=>{const b=$('trbox');b.textContent=x+'\n\n'+y;b.classList.remove('hide')})}
- document.querySelectorAll('a.enh').forEach(a=>a.onclick=e=>{e.preventDefault();enhSrc=decodeURI(a.dataset.s);$('src3').textContent='Clip choisi : '+enhSrc.split('/').pop();tab(3)});
+  if(f)Promise.all([fetch('/files/'+v.id+'/'+enc(f.path)).then(r=>r.text()),g?fetch('/files/'+v.id+'/'+enc(g.path)).then(r=>r.text()):''] ).then(([x,y])=>{const b=$('trbox');b.textContent=x+'\n\n'+y;b.classList.remove('hide')})}
+ document.querySelectorAll('a.enh').forEach(a=>a.onclick=e=>{e.preventDefault();enhSrc=a.dataset.s.split('/').map(decodeURIComponent).join('/');$('src3').textContent='Clip choisi : '+enhSrc.split('/').pop();tab(3)});
  const cb=$('clipsbox');if(v.clips&&v.clips.clips){cb.classList.remove('hide');
   cb.innerHTML='<table><tr><th>#</th><th>Début–fin</th><th>Titre / extrait</th></tr>'+v.clips.clips.map(c=>'<tr><td>'+esc(c.id??'')+'</td><td>'+Math.round(c.start)+'–'+Math.round(c.end)+' s</td><td><b>'+esc(c.title||'')+'</b><br>'+esc((c.text||'').slice(0,160))+'</td></tr>').join('')+'</table>'}}
 function hist(){fetch('/api/history').then(r=>r.json()).then(h=>{$('hist').innerHTML=h.length?h.map(x=>'<a href="#" data-id="'+x.id+'" style="color:var(--ac)">'+x.id+'</a> · '+x.status).join('<br>'):'Aucun travail.';

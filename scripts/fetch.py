@@ -68,8 +68,8 @@ def download(url: str, out_dir: str, max_height: int = 1080, cookies_from_browse
     opts = {
         "format": build_format(max_height),
         "merge_output_format": "mp4",
-        "outtmpl": str(out / "%(title).80B [%(id)s].%(ext)s"),
-        "windowsfilenames": True,
+        "outtmpl": str(out / "%(id)s.%(ext)s"),  # nom simple : pas de #, emoji ni espaces qui cassent les liens
+        "restrictfilenames": True,
         "noplaylist": True,
         "quiet": True,
         "noprogress": True,
@@ -106,7 +106,7 @@ def download(url: str, out_dir: str, max_height: int = 1080, cookies_from_browse
     if verbose:
         print(file=sys.stderr)
     if not path.exists():
-        found = sorted(out.glob(f"*[[]{info.get('id', '')}[]].*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        found = sorted(out.glob(f"*{info.get('id', '')}*.*"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not found:
             raise StudioError("Le téléchargement s'est terminé mais le fichier est introuvable.")
         path = found[0]

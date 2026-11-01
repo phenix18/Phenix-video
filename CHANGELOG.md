@@ -1,5 +1,10 @@
 # Journal des versions — Phenix-video (© 2026 Phenix - kcw)
 
+## 1.3.1
+
+- Correctif : le lien « Télécharger » / la lecture d'un clip échouait quand le nom du fichier contenait `#`, des emoji ou des espaces (titres TikTok). Les liens sont maintenant encodés correctement.
+- Les vidéos téléchargées par lien reçoivent un nom simple (identifiant de la vidéo) ; le titre reste lu depuis les métadonnées.
+
 ## 1.3.0
 
 - Scoring des moments : nouveaux signaux de rétention/complétion/relecture (gratification rapide, départ immédiat, temps morts pénalisés, fin qui reboucle sur l'accroche, clips courts) — bornés à -10/+12.
