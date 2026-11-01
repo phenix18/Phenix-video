@@ -25,7 +25,8 @@ Windows natif : `INSTALLER_WINDOWS.bat` puis `LANCER_WINDOWS.bat`.
 ./phenix clips video.mp4 -o out --stop-after clips
 ./phenix clips video.mp4 -o out --clips-file out/clips.json --tighten --translate-to fr --dub --voice-gender both
 ./phenix enhance out/clip.mp4 -o clip_pro.mp4 --clean --effects cinema --mascot
-./phenix publish out/
+./phenix publish out/            # + BOOST.md (fiche de boost Facebook/TikTok)
+./phenix trends https://… https://… -o tendances --theme "l'argent" --translate-to en   # style des vidéos virales
 ```
 Comme skill Claude Code : cloner ce dépôt dans `~/.claude/skills/phenix-video`.
 

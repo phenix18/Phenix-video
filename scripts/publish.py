@@ -75,6 +75,52 @@ def hashtag(word: str) -> str:
     return "#" + re.sub(r"[^A-Za-z0-9]", "", w)
 
 
+BOOST_SHEET = """# Fiche de boost (publicité payante) — Facebook / TikTok
+
+> Le boost est de la **publicité payante** : il ne change pas l'algorithme organique, il achète de la diffusion
+> à un public ciblé. Phenix-video ne dépense rien et ne se connecte à aucun compte publicitaire : cette fiche te
+> prépare la décision. Les menus, minimums et tarifs changent : vérifie dans l'interface de chaque plateforme.
+
+## 1. Avant de payer (à cocher)
+- [ ] Le clip tient **seul** (compris sans contexte) et l'accroche des 3 premières secondes est forte
+- [ ] Il a déjà été publié en **organique** et regardé jusqu'au bout par une part correcte du public (c'est le meilleur test)
+- [ ] Tu as les **droits** (images, musique, voix) ; voix de synthèse = étiquette « contenu IA » activée
+- [ ] Pas de promesse trompeuse, pas de sujet interdit en publicité (santé miracle, finance « garantie », politique sans autorisation…)
+- [ ] Un but unique : vues, abonnés, messages WhatsApp ou visites du profil
+
+## 2. Facebook / Instagram (Meta) — bouton « Booster » ou Gestionnaire de publicités
+| Réglage | Conseil de départ |
+|---|---|
+| Objectif | Vues de vidéo / Engagement pour la notoriété ; Messages (WhatsApp) pour vendre |
+| Public | Pays/villes de ta cible (ex. Burkina Faso, Ouagadougou, Bobo-Dioulasso), langue, tranche d'âge réaliste ; commence **large** puis affine |
+| Placements | Automatiques au début ; Reels/Stories si ta vidéo est en 9:16 |
+| Durée | 3 à 7 jours pour laisser l'apprentissage se faire |
+| Budget | Petit budget **test** réparti sur 2 variantes (autre accroche ou autre public) ; ne monte que si le résultat est bon |
+| Texte | Reprendre `youtube.txt`/`tiktok.txt` : 1re ligne = promesse, appel à l'action clair (« Écris-nous sur WhatsApp ») |
+
+## 3. TikTok — « Promouvoir » (Promote) ou TikTok Ads Manager
+| Réglage | Conseil de départ |
+|---|---|
+| Objectif | Plus de vues vidéo / visites du profil / abonnés / clics vers le site ou WhatsApp |
+| Public | Automatique au début ; sinon pays, âge, centres d'intérêt de ton client idéal |
+| Durée et budget | Court (2 à 7 jours), petit budget test ; compare 2 vidéos avant d'investir |
+| Format | 9:16, sous-titres lisibles, accroche dans la 1re seconde, publication organique d'abord |
+| Réglages | Garder commentaires ouverts (la preuve sociale aide), étiquette IA si voix/image de synthèse |
+
+## 4. Lire les résultats (après 48–72 h)
+- **Coût par vue utile** (vue de 2 s / 6 s, ThruPlay) plutôt que le nombre de vues brut
+- **Durée moyenne de visionnage** et **rétention** : si ça décroche aux 3 premières secondes, refais l'accroche
+- **Coût par message / par clic** si ton but est de vendre
+- Un clip qui marche en organique ET en payant → décliner la même formule (même accroche, autre sujet)
+- Arrête une variante qui dépense sans résultat au bout de 2 à 3 jours ; ne relance pas la même vidéo identique
+
+## 5. Prudence
+- Ne mets jamais d'argent que tu ne peux pas perdre ; aucun boost ne **garantit** des ventes ni la viralité
+- Méfie-toi des services qui vendent « vues/abonnés » garantis (faux comptes, risque de bannissement)
+- Garde la preuve de paiement et les règles publicitaires de chaque plateforme sous la main
+"""
+
+
 def build_meta(clip: dict, tr: dict | None, lang: str, handle: str | None) -> dict:
     title = clamp(clip.get("title") or "Extrait", 60)
     sents = sentences(tr) if tr else []
@@ -142,6 +188,8 @@ def run(out_dir: str, *, lang: str | None = None, handle: str | None = None) -> 
               "statistiques de ton compte (heures d'activité des abonnés) : c'est la seule source fiable.", "",
               "## Après publication", "Regarde la durée moyenne de visionnage et la rétention à 24–48 h ; "
               "refais les accroches qui décrochent dans les 3 premières secondes."]
+    index += ["", "## Booster (publicité payante)", "Voir `BOOST.md` : checklist Facebook / TikTok, réglages de départ, lecture des résultats."]
+    (dest / "BOOST.md").write_text(BOOST_SHEET, encoding="utf-8")
     (dest / "INDEX.md").write_text("\n".join(index), encoding="utf-8")
     return dest
 

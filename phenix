@@ -11,6 +11,7 @@ case "${1:-help}" in
   clips)    shift; exec $PY scripts/pipeline.py "$@" ;;          # ./phenix clips video.mp4 -o out --stop-after clips
   enhance)  shift; exec $PY scripts/enhance.py "$@" ;;
   publish)  shift; exec $PY scripts/publish.py "$@" ;;
+  trends)   shift; exec $PY scripts/trends.py "$@" ;;
   edit)     shift; exec $PY scripts/edit.py "$@" ;;
   fx)       shift; exec $PY scripts/fx.py "$@" ;;
   update)   exec ./update.sh ;;
@@ -19,6 +20,7 @@ case "${1:-help}" in
 Phenix-video — commandes :
   ./phenix app [--port 9000] [--no-browser]   interface web locale (http://127.0.0.1:8765)
   ./phenix doctor                              diagnostic de l'installation
+  ./phenix trends LIEN… -o tendances --theme "mon sujet"   analyse de vidéos virales (style, hashtags, idées)
   ./phenix selftest                            auto-test des fonctions (1 à 3 minutes)
   ./phenix clips VIDEO|LIEN -o DOSSIER ...     clips, traduction, doublage (--help pour les options)
   ./phenix enhance CLIP -o SORTIE ...          nettoyage, fond, effets, mascotte, stickers

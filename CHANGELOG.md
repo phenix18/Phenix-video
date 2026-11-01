@@ -1,5 +1,12 @@
 # Journal des versions — Phenix-video (© 2026 Phenix - kcw)
 
+## 1.3.0
+
+- Scoring des moments : nouveaux signaux de rétention/complétion/relecture (gratification rapide, départ immédiat, temps morts pénalisés, fin qui reboucle sur l'accroche, clips courts) — bornés à -10/+12.
+- Dossier de publication : `BOOST.md` (fiche de boost Facebook / TikTok : checklist, réglages de départ, lecture des résultats ; aucune dépense automatique).
+- Nouveau : `trends.py` et onglet « Tendances » : analyse de liens de vidéos virales (durée, accroches, hashtags, rythme, accroche parlée avec `--deep`), idées de titres/hashtags pour ton sujet, traduction optionnelle. Recherche YouTube gratuite via yt-dlp.
+- `./phenix trends …` ; `selftest` couvre la publication (boost) et les tendances.
+
 ## 1.2.1
 
 - Correctif : « Le transcript ne contient aucun mot horodaté » sur les vidéos sans parole (sport, musique) ou plus courtes que la durée minimale. Nouveau mode « sans parole » : sélection des moments par énergie sonore + mouvement, clip unique si la vidéo est courte, sous-titres/doublage/traduction désactivés automatiquement.

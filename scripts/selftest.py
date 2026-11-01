@@ -64,7 +64,8 @@ def main() -> int:
         rc, out = sh([*PY, str(HERE / "edit.py"), "delogo", str(mp4[0]), "-o", str(dl), "--area", "br", "--quality", "fast"])
         check("masquage de logo", rc == 0 and dl.exists(), out[-300:])
         rc, out = sh([*PY, str(HERE / "publish.py"), str(o1)])
-        check("dossier de publication", rc == 0 and (o1 / "publish" / "INDEX.md").exists(), out[-300:])
+        check("dossier de publication + fiche de boost", rc == 0 and (o1 / "publish" / "INDEX.md").exists()
+              and (o1 / "publish" / "BOOST.md").exists(), out[-300:])
 
     # 3) sélection par le son/mouvement sur une vidéo plus longue
     long_src = work / "longue.mp4"
@@ -77,6 +78,18 @@ def main() -> int:
                       "--model", "tiny"])
         n = out.count("moment ")
         check("sélection de plusieurs moments forts (sans parole)", rc == 0 and n >= 2, out[-300:])
+
+    # 4) tendances (analyse hors ligne sur des métadonnées synthétiques)
+    import json as _j
+    fake = [{"url": f"https://exemple.test/{i}", "platform": "test", "title": t, "description": "", "duration": d,
+             "views": v, "likes": v // 12, "comments": v // 200, "shares": 0, "engagement": 0.09,
+             "hashtags": ["argent", "astuce"], "hour_utc": 19}
+            for i, (t, d, v) in enumerate([("Pourquoi personne ne te dit la vérité ? #argent", 40, 900000),
+                                           ("5 erreurs à éviter #argent", 35, 500000), ("Le secret des riches #astuce", 52, 300000)])]
+    (work / "fake.json").write_text(_j.dumps({"entries": fake}), encoding="utf-8")
+    rc, out = sh([*PY, str(HERE / "trends.py"), "--from-json", str(work / "fake.json"), "-o", str(work / "tr"), "--theme", "argent"])
+    check("analyse de tendances (rapport + idées)", rc == 0 and (work / "tr" / "TENDANCES.md").exists()
+          and (work / "tr" / "idees.md").exists(), out[-300:])
 
     ok = sum(1 for _, k, _ in results if k)
     print(f"\n{ok}/{len(results)} tests réussis en {time.time() - t0:.0f} s (fichiers : {work})")

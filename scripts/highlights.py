@@ -117,6 +117,44 @@ def gauss(x: float, mu: float, sigma: float) -> float:
     return math.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
 
 
+STOP_LOOP = {"the","and","that","this","with","you","for","are","was","les","des","une","que","qui","pour","dans","pas",
+             "est","sur","vous","nous","avec","mais","donc","not","but","have","has"}
+
+
+def algo_signals(span: list, words: list, dur: float) -> tuple[float, list[str]]:
+    """Signaux alignés sur ce que les plateformes disent mesurer (rétention, fin de visionnage, relecture).
+    Aucun n'est une garantie : ce sont des heuristiques prudentes (bonus/pénalités bornés, -10 à +12)."""
+    bonus = 0.0
+    why: list[str] = []
+    first_words = [w for u in span[:3] for w in u.words]
+    # 1) gratification rapide : un mot fort ou un chiffre dans les ~5 premières secondes
+    t0 = span[0].start
+    early = [w for w in first_words if w["start"] - t0 <= 5.0]
+    if any(re.sub(r"\W", "", w["w"].lower()) in POWER_WORDS or re.search(r"\d", w["w"]) for w in early):
+        bonus += 3; why.append("gratification rapide (mot fort/chiffre dans les 5 s)")
+    # 2) départ immédiat : pas de silence d'ouverture
+    if words and words[0]["start"] - t0 <= 0.6:
+        bonus += 2
+    elif words and words[0]["start"] - t0 > 1.5:
+        bonus -= 3; why.append("pénalité : silence d'ouverture")
+    # 3) trou de rétention : longue pause au milieu (le public « swipe » quand ça traîne)
+    gaps = [b["start"] - a["end"] for a, b in zip(words, words[1:])]
+    long_gaps = sum(1 for g in gaps if g > 1.8)
+    if long_gaps:
+        bonus -= min(6, 3 * long_gaps); why.append(f"pénalité : {long_gaps} temps mort(s) > 1,8 s")
+    # 4) boucle : la fin reprend un mot-clé de l'ouverture → incite à la relecture
+    def keys(ws):
+        return {re.sub(r"\W", "", w["w"].lower()) for w in ws if len(re.sub(r"\W", "", w["w"])) >= 5} - STOP_LOOP
+    if keys(first_words) & keys([w for u in span[-2:] for w in u.words]):
+        bonus += 3; why.append("fin qui reboucle sur l'accroche")
+    # 5) durée courte : meilleure chance d'être regardé jusqu'au bout (taux de complétion)
+    if dur <= 45:
+        bonus += 2
+    elif dur <= 75:
+        bonus += 1
+    return max(-10.0, min(12.0, bonus)), why
+
+
 def score_window(units: list[Unit], i: int, j: int, target: float, extra_power: set[str],
                  energy=None, global_energy=None) -> tuple[float, list[str]]:
     span = units[i:j + 1]
@@ -188,6 +226,11 @@ def score_window(units: list[Unit], i: int, j: int, target: float, extra_power: 
     probs = [w.get("p", 1.0) for w in words if not w.get("estimated")]
     if probs and sum(probs) / len(probs) < 0.6:
         score -= 6; reasons.append("pénalité : transcription peu fiable")
+
+    # --- signaux de rétention / complétion / relecture (-10 à +12)
+    adj, adj_why = algo_signals(span, words, dur)
+    score += adj
+    reasons.extend(adj_why)
 
     # --- énergie audio (0-5)
     if energy is not None and global_energy is not None:

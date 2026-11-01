@@ -109,6 +109,22 @@ def build_command(kind: str, opt: dict, out_dir: Path) -> list[str]:
         if opt.get("handle"):
             cmd += ["--handle", str(opt["handle"])[:60]]
         return cmd
+    if kind == "trends":
+        links = [l.strip() for l in re.split(r"[\s,]+", str(opt.get("links", ""))) if l.strip()][:30]
+        if any(not re.match(r"^https?://", l) for l in links):
+            raise ValueError("Chaque lien doit commencer par http:// ou https://")
+        search = str(opt.get("search", "")).strip()[:120]
+        if not links and not search:
+            raise ValueError("Colle au moins un lien, ou écris une recherche.")
+        cmd = [*py, str(HERE / "trends.py"), "-o", str(out_dir / "tendances"),
+               "--theme", str(opt.get("theme", ""))[:80], "--lang", choice(opt.get("lang"), ["fr", "en"], "fr")]
+        if opt.get("translate_to") in ("fr", "en", "es", "pt", "de", "ar"):
+            cmd += ["--translate-to", opt["translate_to"]]
+        if opt.get("deep"):
+            cmd += ["--deep"]
+        if search and not links:
+            cmd += ["--search", search, "--n", "10"]
+        return [*cmd, "--", *links] if links else cmd
     src = opt.get("source", "").strip()
     if not src:
         raise ValueError("Aucune vidéo ni lien fourni.")
@@ -237,7 +253,7 @@ def list_outputs(job_id: str) -> list[dict]:
             continue
         if p.suffix.lower() in (".mp4", ".jpg", ".md", ".json", ".txt") and ".tight" not in p.name and p.name != "log.txt" \
                 and p.name not in ("options.json",):
-            if p.suffix == ".json" and p.name not in ("clips.json", "report.json"):
+            if p.suffix == ".json" and p.name not in ("clips.json", "report.json", "trends.json"):
                 continue
             if p.suffix == ".txt" and "publish" not in p.parts:
                 continue
@@ -409,7 +425,7 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b"{}")
             if path == "/api/jobs":
                 kind = data.get("kind", "clips")
-                if kind not in ("clips", "delogo", "enhance", "publish"):
+                if kind not in ("clips", "delogo", "enhance", "publish", "trends"):
                     return self._err(400, "Type de travail inconnu.")
                 return self._json({"id": start_job(kind, data.get("options", {}))})
             if m := re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path):
@@ -505,7 +521,7 @@ main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-temp
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
 h2{font-size:14px;margin:0 0 12px;color:var(--ac);text-transform:uppercase;letter-spacing:.06em}
 label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
-input,select{width:100%;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit}
+input,select,textarea{width:100%;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit}
 input[type=checkbox]{width:auto;margin-right:8px}.chk{display:flex;align-items:center;margin:8px 0;color:var(--tx);font-size:14px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 button{background:var(--ac);color:#111;border:0;border-radius:8px;padding:11px 14px;font-weight:700;cursor:pointer;width:100%;margin-top:14px;font:inherit;font-weight:700}
@@ -527,14 +543,15 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
 <small id="health"></small></header>
 <main>
 <section class="card">
-  <div class="tabs"><button class="sec" id="t1">Clips &amp; doublage</button><button class="sec" id="t2">Masquer ma marque</button><button class="sec" id="t3">Améliorer</button></div>
+  <div class="tabs"><button class="sec" id="t1">Clips &amp; doublage</button><button class="sec" id="t2">Masquer ma marque</button><button class="sec" id="t3">Améliorer</button><button class="sec" id="t4">Tendances</button></div>
+  <div id="srcbox">
 
   <h2>1. Vidéo</h2>
   <div class="drop" id="drop">Glisse ta vidéo ici ou clique pour choisir<input id="file" type="file" accept="video/*" hidden></div>
   <div class="bar"><i id="up"></i></div>
   <label>…ou un lien (ta propre vidéo, ou avec autorisation)</label>
   <input id="url" placeholder="https://www.youtube.com/watch?v=…">
-  <div class="note" id="src">Aucune source.</div>
+  <div class="note" id="src">Aucune source.</div></div>
 
   <div id="p1">
   <h2 style="margin-top:18px">2. Montage</h2>
@@ -566,6 +583,20 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
     <label>Méthode</label><select id="method"><option value="blur">Flou</option><option value="delogo">Effacement doux</option><option value="box">Bandeau noir</option></select>
     <button id="godl">Masquer</button>
     <div class="note">À utiliser pour ton propre logo ou nom de compte. Ne retire pas le crédit d'un autre créateur : c'est contraire aux règles des plateformes et à son droit d'auteur.</div>
+  </div>
+  <div id="p4" class="hide">
+    <h2 style="margin-top:18px">Analyser des vidéos virales</h2>
+    <div class="note">Colle des liens (un par ligne) de vidéos qui marchent dans ta niche (TikTok, YouTube, Instagram…). Phenix-video lit les infos publiques (titre, durée, vues, hashtags) et en tire la formule : durée, formes d'accroche, hashtags, idées de titres pour TON sujet. Il ne copie pas les vidéos.</div>
+    <label>Liens</label><textarea id="tr_links" rows="5" placeholder="https://www.tiktok.com/@…/video/…&#10;https://www.youtube.com/shorts/…"></textarea>
+    <label>…ou recherche YouTube (si aucun lien)</label><input id="tr_search" placeholder="astuces argent">
+    <div class="row"><div><label>Ton sujet</label><input id="tr_theme" placeholder="ex. l'argent, le football, la cuisine"></div>
+    <div><label>Langue des idées</label><select id="tr_lang"><option value="fr">Français</option><option value="en">Anglais</option></select></div></div>
+    <label>Traduire les titres proposés vers</label>
+    <select id="tr_to"><option value="">Non</option><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option><option value="pt">Portugais</option><option value="de">Allemand</option><option value="ar">Arabe</option></select>
+    <div class="chk"><input id="tr_deep" type="checkbox">Analyse approfondie (télécharge en basse définition : accroche parlée + rythme de montage, plus lent)</div>
+    <button id="gotr">Analyser les tendances</button>
+    <div class="note">Ce sont des corrélations, pas une recette garantie. Inspire-toi de la formule, refais ton propre contenu.</div>
+    <pre id="trbox" class="hide" style="white-space:pre-wrap;max-height:480px;overflow:auto"></pre>
   </div>
   <div id="p3" class="hide">
     <h2 style="margin-top:18px">2. Améliorer la vidéo</h2>
@@ -605,8 +636,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
 const $=id=>document.getElementById(id);let source="",cur=null,timer=null,kind="clips";
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 fetch('/api/health').then(r=>r.json()).then(h=>{$('health').textContent=(h.ffmpeg?'FFmpeg ✓':'⚠ FFmpeg introuvable')+' · dossier : '+h.workdir});
-function tab(n){kind=['','clips','delogo','enhance'][n];['p1','p2','p3'].forEach((id,i)=>$(id).classList.toggle('hide',n!=i+1))}
-$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);$('t3').onclick=()=>tab(3);
+function tab(n){kind=['','clips','delogo','enhance','trends'][n];['p1','p2','p3','p4'].forEach((id,i)=>$(id).classList.toggle('hide',n!=i+1));$('srcbox').classList.toggle('hide',n==4)}
+$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);$('t3').onclick=()=>tab(3);$('t4').onclick=()=>tab(4);
 const FX={vignette:'Vignette',warm:'Chaud',cool:'Froid',cinema:'Cinéma',vivid:'Éclatant',bw:'Noir & blanc',grain:'Grain',sharpen:'Netteté',glitch:'Glitch',shake:'Tremblement',flash:'Flash',zoomin:'Zoom lent',fade:'Fondu',lowlight:'Éclaircir'};
 $('fxlist').innerHTML=Object.entries(FX).map(([k,v])=>'<label class="chk" style="margin:2px 0"><input type="checkbox" class="fxc" value="'+k+'">'+v+'</label>').join('');
 let enhSrc="";
@@ -637,6 +668,10 @@ async function start(k,o){if(!o.source){alert('Ajoute une vidéo ou un lien.');r
  if(j.error){alert(j.error);return}cur=j.id;$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()}
 $('go').onclick=()=>start('clips',opts(false));$('an').onclick=()=>start('clips',opts(true));
 $('godl').onclick=()=>start('delogo',{source:$('url').value.trim()||source,method:$('method').value,areas:[...document.querySelectorAll('.ar:checked')].map(x=>x.value)});
+$('gotr').onclick=async()=>{const o={links:$('tr_links').value,search:$('tr_search').value,theme:$('tr_theme').value,lang:$('tr_lang').value,translate_to:$('tr_to').value,deep:$('tr_deep').checked};
+ if(!o.links.trim()&&!o.search.trim()){alert('Colle des liens ou écris une recherche.');return}
+ const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'trends',options:o})});const j=await r.json();
+ if(j.error){alert(j.error);return}cur=j.id;$('trbox').classList.add('hide');$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()};
 $('cancel').onclick=()=>fetch('/api/jobs/'+cur+'/cancel',{method:'POST',body:'{}'});
 function poll(){clearTimeout(timer);if(!cur)return;fetch('/api/jobs/'+cur).then(r=>r.json()).then(v=>{render(v);if(v.status==='running'||v.status==='queued')timer=setTimeout(poll,1500);else hist()})}
 function render(v){const lab={queued:'En attente',running:'En cours…',done:'Terminé',error:'Erreur',cancelled:'Annulé'}[v.status]||v.status;
@@ -648,6 +683,8 @@ function render(v){const lab={queued:'En attente',running:'En cours…',done:'Te
  +oth.map(o=>'<div class="v"><a href="/files/'+v.id+'/'+encodeURI(o.path)+'" target="_blank">'+esc(o.name)+'</a></div>').join('');
  $('pub').classList.toggle('hide',!(v.status==='done'&&v.kind==='clips'&&mp.length));
  $('ai').classList.toggle('hide',!(mp.length&&v.kind==='clips'&&$('dub').checked&&$('to').value));
+ if(v.kind==='trends'&&v.status==='done'){const f=v.outputs.find(o=>o.name==='TENDANCES.md'),g=v.outputs.find(o=>o.name==='idees.md');
+  if(f)Promise.all([fetch('/files/'+v.id+'/'+encodeURI(f.path)).then(r=>r.text()),g?fetch('/files/'+v.id+'/'+encodeURI(g.path)).then(r=>r.text()):''] ).then(([x,y])=>{const b=$('trbox');b.textContent=x+'\n\n'+y;b.classList.remove('hide')})}
  document.querySelectorAll('a.enh').forEach(a=>a.onclick=e=>{e.preventDefault();enhSrc=decodeURI(a.dataset.s);$('src3').textContent='Clip choisi : '+enhSrc.split('/').pop();tab(3)});
  const cb=$('clipsbox');if(v.clips&&v.clips.clips){cb.classList.remove('hide');
   cb.innerHTML='<table><tr><th>#</th><th>Début–fin</th><th>Titre / extrait</th></tr>'+v.clips.clips.map(c=>'<tr><td>'+esc(c.id??'')+'</td><td>'+Math.round(c.start)+'–'+Math.round(c.end)+' s</td><td><b>'+esc(c.title||'')+'</b><br>'+esc((c.text||'').slice(0,160))+'</td></tr>').join('')+'</table>'}}

@@ -101,7 +101,7 @@ Scripts unitaires : `fetch.py`, `polish.py`, `fx.py`, `background.py`, `characte
 
 - `enhance.py clip.mp4 -o out.mp4 --clean --bg blur|color:#hex|image:f|video:f --effects cinema,vignette --title "…" --mascot --sticker logo.png@tr,0.15,0,99` (détails : `references/effects-and-characters.md`, catalogue : `fx.py --list`).
 - Mascotte originale synchronisée à la voix (`characters.py mascot`), stickers/GIF fournis par l'utilisateur. Ne jamais dessiner de personnage protégé.
-- `publish.py out/` : dossier prêt à publier (titres, descriptions, hashtags, miniature). `youtube_upload.py` : envoi YouTube officiel (privé par défaut). TikTok : publication manuelle (`references/publishing.md`).
+- `publish.py out/` : dossier prêt à publier (titres, descriptions, hashtags, miniature). `publish.py` écrit aussi `BOOST.md` (fiche de boost Facebook/TikTok, publicité payante, rien n'est dépensé automatiquement). `trends.py` (onglet « Tendances ») analyse des liens de vidéos virales (durée, formes d'accroche, hashtags, rythme) et propose titres/hashtags pour TON sujet, traduisibles ; il s'inspire de la formule sans copier le contenu. `youtube_upload.py` : envoi YouTube officiel (privé par défaut). TikTok : publication manuelle (`references/publishing.md`).
 - Le remplacement de fond n'a pas été validé sur de vraies personnes dans l'environnement de développement : regarder le résultat avant de livrer.
 
 ## Règles des plateformes
