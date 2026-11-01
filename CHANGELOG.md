@@ -1,5 +1,10 @@
 # Journal des versions — Phenix-video (© 2026 Phenix - kcw)
 
+## 1.4.1
+
+- Mascotte **phenix_forever** : ton image de phénix (fond retiré, `assets/phenix_forever.png`) remplace la mascotte chacal par défaut. Elle respire, pulse, rebondit et rayonne (halo orangé) avec le volume de la voix. `--style chacal` garde l'ancienne mascotte dessinée. L'original est conservé dans `assets/phenix_forever_original.jpg`.
+- Libellés « ANUBIS » remplacés par « phenix_forever » (interface, journaux, exemples).
+
 ## 1.4.0
 
 - **Application PC** : `scripts/desktop.py` ouvre Phenix-video dans sa propre fenêtre (pywebview, sinon mode application Edge/Chrome, sinon navigateur). Icône originale, raccourcis Windows (Bureau + menu Démarrer) et Linux (`./phenix desktop --install-shortcut`).

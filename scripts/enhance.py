@@ -75,7 +75,7 @@ def enhance(src: str, out: str, *, clean: bool = False, bg: str | None = None, e
             fx.apply(cur, o, effects, clean=clean, title=title, quality="high")
             cur = o
         if mascot:
-            log("[mascotte] chacal original, bouche synchronisée à la voix")
+            log("[mascotte] phenix_forever, pulse et rayonne avec la voix")
             o = nxt()
             characters.add_mascot(cur, o, position=mascot_position, scale=mascot_scale, quality="high")
             cur = o

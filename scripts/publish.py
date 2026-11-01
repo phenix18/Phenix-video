@@ -3,7 +3,7 @@
 """Prépare un dossier « prêt à publier » par clip : vidéo, miniature, titre, description, hashtags.
 
   publish.py out/                 (dossier produit par pipeline.py, avec report.json)
-  publish.py out/ --handle @anubislabs --lang fr
+  publish.py out/ --handle @phenix_forever --lang fr
 
 Pour chaque clip : `publish/NN_slug/` avec video.mp4, cover.jpg (si elle existe), youtube.txt, tiktok.txt,
 metadata.json, et un `publish/INDEX.md`. Tout est local et sans API ; relis et réécris les titres avant d'envoyer.

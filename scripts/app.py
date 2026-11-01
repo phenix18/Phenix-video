@@ -733,7 +733,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
     <label>Effets (plusieurs possibles)</label>
     <div id="fxlist" class="row"></div>
     <label>Titre animé (3 s)</label><input id="e_title" maxlength="80" placeholder="Optionnel">
-    <div class="chk"><input id="e_mascot" type="checkbox">Mascotte ANUBIS (bouche synchronisée à la voix)</div>
+    <div class="chk"><input id="e_mascot" type="checkbox">Mascotte phenix_forever (pulse avec la voix)</div>
     <div class="row"><div><label>Position mascotte</label><select id="e_mpos"><option value="br">Bas droite</option><option value="bl">Bas gauche</option><option value="tr">Haut droite</option><option value="tl">Haut gauche</option></select></div>
     <div><label>Sticker / GIF (à toi)</label><input id="e_stk" type="file" accept="image/*"></div></div>
     <button id="goenh">Améliorer</button>

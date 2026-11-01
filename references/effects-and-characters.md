@@ -24,7 +24,7 @@ devant un fond chargé et vêtements de la couleur du fond donnent des bords moi
 personne n'est détecté. Plus lent que les autres étapes (CPU).
 
 ## Personnages (`characters.py`)
-- `mascot` : mascotte ORIGINALE (chacal doré/anthracite), bouche synchronisée au volume de la voix, clignement, rebond.
+- `mascot` : mascotte **phenix_forever** (ton phénix, `assets/phenix_forever.png`, fond transparent) : elle pulse, rebondit et rayonne (halo orangé) avec le volume de la voix. `--style chacal` = ancienne mascotte dessinée. Pour changer l'image : remplace `assets/phenix_forever.png` (PNG carré à fond transparent).
   `characters.py preview mascot.png` en donne un aperçu. Position `br|bl|tr|tl|bc|tc|center`, `--scale`, `--start/--end`.
 - `sticker` : ton image PNG/GIF (logo, emoji, mascotte de ta marque) avec position, taille, plage de temps, fondu d'entrée.
 - Pas de personnages protégés (dessins animés, films, jeux). Pas de génération de personnages par IA (GPU/API payante).

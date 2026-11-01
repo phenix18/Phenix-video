@@ -3,7 +3,8 @@
 """Personnages et stickers superposés à la vidéo (gratuit, local).
 
   characters.py mascot in.mp4 -o out.mp4 [--position br] [--scale 0.28] [--start 0 --end 10]
-      Mascotte ORIGINALE (chacal doré/anthracite) dont la bouche suit le volume de la voix, qui cligne et rebondit.
+      Mascotte « phenix_forever » (ton phénix, assets/phenix_forever.png) : elle pulse, rebondit et rayonne avec le volume
+      de la voix (--style chacal : ancienne mascotte dessinée, bouche synchronisée).
   characters.py sticker in.mp4 -o out.mp4 --image perso.png|anim.gif [--position tr] [--scale 0.2] [--start 2 --end 6]
       Image / GIF animé que tu fournis (logo, emoji, mascotte de ta marque).
   characters.py preview mascot.png        écrit un aperçu de la mascotte
@@ -102,6 +103,42 @@ def draw_mascot(size: int, mouth: float = 0.0, blink: float = 0.0, bounce: float
     return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
 
 
+MASCOT_NAME = "phenix_forever"
+MASCOT_IMG = Path(__file__).resolve().parent.parent / "assets" / "phenix_forever.png"
+
+
+def load_phoenix(size: int):
+    """Image de la mascotte phenix_forever (RGBA → BGRA, alpha non prémultiplié), carrée `size`."""
+    import cv2
+    img = cv2.imread(str(MASCOT_IMG), cv2.IMREAD_UNCHANGED)
+    if img is None or img.ndim != 3 or img.shape[2] != 4:
+        raise StudioError(f"Image de la mascotte introuvable ou sans transparence : {MASCOT_IMG}")
+    return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+
+
+def draw_phoenix(base, level: float = 0.0, bob: float = 0.0, t: float = 0.0):
+    """Une image de la mascotte : pulsation d'échelle + halo orangé selon le volume (`level` 0..1), flottement doux."""
+    import cv2
+    import numpy as np
+    size = base.shape[0]
+    scale = 0.90 + 0.10 * level + 0.012 * math.sin(t * 2.2)  # respiration lente + pulsation à la voix
+    dy = (-0.035 * level + 0.012 * math.sin(t * 2.2) + 0.02 * bob) * size
+    m = np.float32([[scale, 0, size * (1 - scale) / 2], [0, scale, size * (1 - scale) / 2 + dy]])
+    out = cv2.warpAffine(base, m, (size, size), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+    if level > 0.05:  # halo : alpha flouté teinté orange derrière l'oiseau
+        a = cv2.GaussianBlur(out[..., 3].astype(np.float32) / 255.0, (0, 0), size * 0.035)
+        glow_a = np.clip(a * 0.9 * level, 0, 1)
+        res = np.zeros_like(out, dtype=np.float32)
+        res[..., 0], res[..., 1], res[..., 2] = 40, 150, 255  # BGR : orange vif
+        fa = out[..., 3].astype(np.float32) / 255.0
+        total = glow_a + fa * (1 - glow_a)
+        for c in range(3):
+            res[..., c] = (res[..., c] * glow_a * (1 - fa) + out[..., c] * fa) / np.maximum(total - 0 * glow_a, 1e-4)
+        res[..., 3] = np.clip(total, 0, 1) * 255
+        return np.clip(res, 0, 255).astype(np.uint8)
+    return out
+
+
 def _envelope(src: str, fps: float, frames: int):
     """Volume de la voix par image, normalisé 0..1 (pour la bouche)."""
     import numpy as np
@@ -128,8 +165,9 @@ def _envelope(src: str, fps: float, frames: int):
 
 
 def add_mascot(src: str, out: str, *, position: str = "br", scale: float = 0.28, start: float = 0.0,
-               end: float | None = None, quality: str = "balanced") -> None:
+               end: float | None = None, quality: str = "balanced", style: str = "phenix_forever") -> None:
     need_binary("ffmpeg")
+    use_img = style != "chacal" and MASCOT_IMG.is_file()
     info = probe(src)
     fps = info.fps
     frames = int(info.duration * fps) + 2
@@ -149,9 +187,19 @@ def add_mascot(src: str, out: str, *, position: str = "br", scale: float = 0.28,
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         cache: dict[tuple, bytes] = {}
+        base = load_phoenix(side) if use_img else None
         for i in range(frames):
             t = i / fps
             mouth = round(float(env[i]) * 6) / 6  # quantifié : réutilise les images déjà dessinées
+            if use_img:
+                bob = round(math.sin(t * 9.0) * float(env[i]) * 4) / 4
+                key = (mouth, bob, round(t * 12) / 12)  # le flottement lent est recalculé ~12 fois/s
+                if key not in cache:
+                    cache[key] = draw_phoenix(base, mouth, bob, key[2]).tobytes()
+                    if len(cache) > 600:
+                        cache.pop(next(iter(cache)))
+                proc.stdin.write(cache[key])
+                continue
             blink = 1.0 if (t % 3.6) < 0.12 else 0.0
             bounce = round(math.sin(t * 9.0) * float(env[i]) * 4) / 4
             key = (mouth, blink, bounce)
@@ -215,6 +263,8 @@ def main() -> None:
         p.add_argument("--quality", default="balanced", choices=list(QUALITY))
         if name == "sticker":
             p.add_argument("--image", required=True)
+        else:
+            p.add_argument("--style", default="phenix_forever", choices=["phenix_forever", "chacal"])
     pv = sub.add_parser("preview")
     pv.add_argument("out")
     a = ap.parse_args()
@@ -222,7 +272,9 @@ def main() -> None:
         if a.cmd == "preview":
             import cv2
             import numpy as np
-            tiles = [draw_mascot(300, m, b, 0) for m, b in ((0, 0), (0.5, 0), (1.0, 0), (0.4, 1))]
+            base = load_phoenix(300) if MASCOT_IMG.is_file() else None
+            tiles = ([draw_phoenix(base, lv, 0, 0.5) for lv in (0, 0.4, 0.7, 1.0)] if base is not None
+                     else [draw_mascot(300, m, b, 0) for m, b in ((0, 0), (0.5, 0), (1.0, 0), (0.4, 1))])
             sheet = np.concatenate(tiles, axis=1)
             bg = np.full(sheet.shape[:2] + (3,), 235, np.uint8)
             al = sheet[..., 3:4] / 255.0
@@ -232,7 +284,7 @@ def main() -> None:
         end = parse_time(a.end) if a.end else None
         if a.cmd == "mascot":
             add_mascot(a.input, a.out, position=a.position, scale=a.scale, start=parse_time(a.start), end=end,
-                       quality=a.quality)
+                       quality=a.quality, style=a.style)
         else:
             add_sticker(a.input, a.out, a.image, position=a.position, scale=a.scale, start=parse_time(a.start),
                         end=end, quality=a.quality)
