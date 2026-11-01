@@ -18,21 +18,31 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install pyinstaller
-          pyinstaller --onefile --console --name PhenixVideo windows/launcher.py
+          pyinstaller --onefile --console --icon assets/icon.ico --name PhenixVideo windows/launcher.py
       - name: Assembler l'archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path Phenix-video-windows | Out-Null
           Copy-Item dist/PhenixVideo.exe Phenix-video-windows/
-          Copy-Item -Recurse scripts, references, docs Phenix-video-windows/
+          Copy-Item -Recurse scripts, references, docs, assets Phenix-video-windows/
           Copy-Item requirements.txt, README.md, LICENSE, NOTICE.md, VERSION, CHANGELOG.md Phenix-video-windows/
           Compress-Archive -Path Phenix-video-windows -DestinationPath Phenix-video-windows.zip
+      - name: Construire l'installateur (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $env:PHENIX_VERSION = (Get-Content VERSION).Trim()
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" windows\installer.iss
       - uses: actions/upload-artifact@v4
         with:
           name: Phenix-video-windows
-          path: Phenix-video-windows.zip
+          path: |
+            Phenix-video-windows.zip
+            dist/Phenix-video-Setup.exe
       - name: Publier dans les Releases (sur tag v*)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: Phenix-video-windows.zip
+          files: |
+            Phenix-video-windows.zip
+            dist/Phenix-video-Setup.exe

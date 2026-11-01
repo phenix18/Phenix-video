@@ -41,7 +41,9 @@ FAILS: dict[str, tuple[int, float]] = {}  # ip -> (échecs, bloqué jusqu'à)
 
 MANIFEST = json.dumps({"name": "Phenix-video", "short_name": "Phenix", "start_url": "/", "display": "standalone",
                        "background_color": "#0f1115", "theme_color": "#f5b301",
-                       "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]})
+                       "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                                 {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                                 {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]})
 ICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#0f1115"/>'
         '<polygon points="22,48 20,14 40,30" fill="#f5b301"/><polygon points="78,48 80,14 60,30" fill="#f5b301"/>'
         '<ellipse cx="50" cy="52" rx="28" ry="26" fill="#2e2622" stroke="#f5b301" stroke-width="3"/>'
@@ -50,7 +52,7 @@ ICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect wid
         '<circle cx="40" cy="45" r="3" fill="#181212"/><circle cx="62" cy="45" r="3" fill="#181212"/></svg>')
 SW = "self.addEventListener('fetch',()=>{});"  # service worker minimal : rend l'application installable
 LOGIN = ('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-         '<title>Phenix-video</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#f5b301">'
+         '<title>Phenix-video</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.png"><meta name="theme-color" content="#f5b301">'
          '<style>body{margin:0;background:#0f1115;color:#e8eaf0;font:16px system-ui;display:grid;place-items:center;min-height:100vh}'
          'form{background:#181b22;border:1px solid #2a2f3a;border-radius:14px;padding:24px;width:min(320px,90vw);text-align:center}'
          'input{width:100%;padding:12px;border-radius:8px;border:1px solid #2a2f3a;background:#0f1218;color:#fff;font-size:22px;'
@@ -75,6 +77,10 @@ def local_ip() -> str:
 JOBS: dict[str, dict] = {}
 LOCK = threading.Lock()
 WORKDIR = Path.home() / "PhenixVideo"
+try:
+    VERSION = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
+except OSError:
+    VERSION = "?"
 
 
 def safe_name(name: str) -> str:
@@ -109,6 +115,19 @@ def build_command(kind: str, opt: dict, out_dir: Path) -> list[str]:
         if opt.get("handle"):
             cmd += ["--handle", str(opt["handle"])[:60]]
         return cmd
+    if kind in ("doctor", "selftest"):
+        return [*py, str(HERE / f"{kind}.py")]
+    if kind == "youtube":
+        jid, folder = opt.get("job", ""), opt.get("folder", "")
+        base = (job_dir(jid) / "out" / "publish") if re.fullmatch(r"[\w-]+", jid) else None
+        target = (base / folder).resolve() if base else None
+        if not target or base.resolve() not in target.parents or not (target / "video.mp4").is_file():
+            raise ValueError("Dossier de publication introuvable : prépare d'abord le dossier de publication.")
+        secret = WORKDIR / "client_secret.json"
+        if not secret.is_file():
+            raise ValueError("Ajoute d'abord ton fichier client_secret.json (onglet Réglages).")
+        return [*py, str(HERE / "youtube_upload.py"), "--from-folder", str(target), "--client-secret", str(secret),
+                "--privacy", choice(opt.get("privacy"), ["private", "unlisted", "public"], "private")]
     if kind == "trends":
         links = [l.strip() for l in re.split(r"[\s,]+", str(opt.get("links", ""))) if l.strip()][:30]
         if any(not re.match(r"^https?://", l) for l in links):
@@ -141,6 +160,56 @@ def build_command(kind: str, opt: dict, out_dir: Path) -> list[str]:
         source = str(WORKDIR / "uploads" / safe_name(src))
         if not Path(source).is_file():
             raise ValueError("Fichier téléversé introuvable.")
+
+    if kind == "tool":
+        tool = opt.get("tool", "")
+        ext = {"thumbnail": "cover.jpg"}.get(tool, "resultat.mp4")
+        q = choice(opt.get("quality"), ["max", "high", "balanced", "fast"], "balanced")
+        cmd = [*py, str(HERE / "edit.py"), tool, source, "-o", str(out_dir / ext), "--quality", q]
+
+        def up(key, label, exts):
+            f = WORKDIR / "uploads" / safe_name(opt.get(key, ""))
+            if not opt.get(key) or not f.is_file() or f.suffix.lower() not in exts:
+                raise ValueError(f"{label} non téléversé(e).")
+            return str(f)
+        if tool == "trim":
+            cmd += ["--start", str(opt.get("start") or "0")]
+            if opt.get("end"):
+                cmd += ["--end", str(opt["end"])]
+        elif tool == "speed":
+            cmd += ["--factor", str(num(opt.get("factor"), 1.25, 0.25, 4))]
+        elif tool == "silence":
+            pass
+        elif tool == "music":
+            cmd += ["--track", up("track", "Musique", (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")),
+                    "--volume", str(num(opt.get("volume"), 0.15, 0.02, 1))]
+        elif tool == "text":
+            if not str(opt.get("text", "")).strip():
+                raise ValueError("Écris le texte du titre.")
+            cmd += ["--text", str(opt["text"])[:120], "--position", choice(opt.get("position"), ["top", "center", "bottom"], "top"),
+                    "--start", str(opt.get("start") or "0"), "--box"]
+            if opt.get("end"):
+                cmd += ["--end", str(opt["end"])]
+        elif tool == "punch":
+            at = ",".join(x for x in re.split(r"[,\s]+", str(opt.get("at", ""))) if re.fullmatch(r"\d+(\.\d+)?", x))
+            if not at:
+                raise ValueError("Indique les instants (en secondes) des zooms, ex. 3,12,20.")
+            cmd += ["--at", at]
+        elif tool == "voice":
+            cmd += ["--preset", choice(opt.get("preset"), ["deep", "low", "high", "child", "radio", "echo", "robot"], "deep")]
+        elif tool == "loudnorm" or tool == "stabilize":
+            pass
+        elif tool == "logo":
+            cmd += ["--image", up("image", "Logo", (".png", ".jpg", ".jpeg", ".webp")),
+                    "--position", choice(opt.get("position"), ["tl", "tr", "bl", "br", "center"], "br"),
+                    "--scale", str(num(opt.get("scale"), 0.15, 0.05, 0.6))]
+        elif tool == "burn":
+            cmd += ["--subs", up("subs", "Sous-titres", (".srt", ".ass"))]
+        elif tool == "thumbnail":
+            pass
+        else:
+            raise ValueError("Outil inconnu.")
+        return cmd
 
     if kind == "enhance":
         cmd = [*py, str(HERE / "enhance.py"), source, "-o", str(out_dir / "ameliore.mp4"),
@@ -342,6 +411,18 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, path: str) -> bool:
         files = {"/manifest.webmanifest": ("application/manifest+json", MANIFEST), "/icon.svg": ("image/svg+xml", ICON),
                  "/sw.js": ("application/javascript", SW)}
+        if path in ("/icon-192.png", "/icon-512.png", "/favicon.png"):
+            png = HERE.parent / "assets" / ("icon-192.png" if path != "/icon-512.png" else "icon-512.png")
+            if not png.is_file():
+                return False
+            body = png.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "max-age=86400")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
         if path not in files:
             return False
         ctype, text = files[path]
@@ -400,7 +481,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/history":
             self._json(history())
         elif path == "/api/health":
-            self._json({"ffmpeg": bool(shutil.which("ffmpeg")), "workdir": str(WORKDIR), "python": sys.version.split()[0]})
+            self._json({"ffmpeg": bool(shutil.which("ffmpeg")), "workdir": str(WORKDIR), "python": sys.version.split()[0],
+                        "version": VERSION, "youtube_ready": (WORKDIR / "client_secret.json").is_file()})
         elif m := re.fullmatch(r"/api/jobs/([\w-]+)", path):
             v = job_view(m.group(1))
             self._json(v) if v else self._err(404, "Travail introuvable.")
@@ -419,13 +501,27 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return self._err(401, "Non autorisé.")
         try:
+            if path == "/api/secret":
+                n = int(self.headers.get("Content-Length") or 0)
+                if not 0 < n < 200_000:
+                    return self._err(400, "Fichier invalide.")
+                raw = self.rfile.read(n)
+                try:
+                    js = json.loads(raw)
+                    ok = isinstance(js, dict) and ("installed" in js or "web" in js)
+                except ValueError:
+                    ok = False
+                if not ok:
+                    return self._err(400, "Ce n'est pas un client_secret.json de Google (type « application de bureau »).")
+                (WORKDIR / "client_secret.json").write_bytes(raw)
+                return self._json({"ok": True})
             if path == "/api/upload":
                 return self._upload(parse_qs(url.query).get("name", ["video"])[0])
             n = int(self.headers.get("Content-Length") or 0)
             data = json.loads(self.rfile.read(n) or b"{}")
             if path == "/api/jobs":
                 kind = data.get("kind", "clips")
-                if kind not in ("clips", "delogo", "enhance", "publish", "trends"):
+                if kind not in ("clips", "delogo", "enhance", "publish", "trends", "tool", "doctor", "selftest", "youtube"):
                     return self._err(400, "Type de travail inconnu.")
                 return self._json({"id": start_job(kind, data.get("options", {}))})
             if m := re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path):
@@ -510,7 +606,7 @@ class Handler(BaseHTTPRequestHandler):
 PAGE = r"""<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Phenix-video</title>
-<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#f5b301">
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.png"><meta name="theme-color" content="#f5b301">
 <style>
 :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--tx:#e8eaf0;--mut:#8b93a7;--ac:#f5b301;--ok:#3ecf8e;--er:#ff5d5d}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
@@ -536,14 +632,14 @@ pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:10
 .v video{width:100%;aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:6px}
 .v a{color:var(--ac);font-size:12px;word-break:break-all}.note{font-size:12px;color:var(--mut);margin-top:10px}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-.tabs{display:flex;gap:8px;margin-bottom:10px}.tabs button{margin:0;padding:8px}.hide{display:none}
+.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px}.tabs button{margin:0;padding:8px 4px;font-size:13px}.tabs button.on{background:var(--ac);color:#111;border-color:var(--ac)}.hide{display:none}
 .bar{height:6px;background:#0f1218;border-radius:4px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;background:var(--ac);width:0}
 </style></head><body>
 <header><h1>Phenix-video</h1><small>100 % local · gratuit · rien n'est envoyé sur Internet</small>
 <small id="health"></small></header>
 <main>
 <section class="card">
-  <div class="tabs"><button class="sec" id="t1">Clips &amp; doublage</button><button class="sec" id="t2">Masquer ma marque</button><button class="sec" id="t3">Améliorer</button><button class="sec" id="t4">Tendances</button></div>
+  <div class="tabs"><button class="sec" id="t1">Clips &amp; doublage</button><button class="sec" id="t2">Masquer ma marque</button><button class="sec" id="t3">Améliorer</button><button class="sec" id="t4">Tendances</button><button class="sec" id="t5">Outils</button><button class="sec" id="t6">Réglages</button></div>
   <div id="srcbox">
 
   <h2>1. Vidéo</h2>
@@ -598,6 +694,34 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
     <div class="note">Ce sont des corrélations, pas une recette garantie. Inspire-toi de la formule, refais ton propre contenu.</div>
     <pre id="trbox" class="hide" style="white-space:pre-wrap;max-height:480px;overflow:auto"></pre>
   </div>
+  <div id="p5" class="hide">
+    <h2 style="margin-top:18px">2. Outil de montage</h2>
+    <label>Outil</label>
+    <select id="tl"><option value="trim">Couper un passage</option><option value="speed">Accélérer / ralentir</option><option value="silence">Supprimer les blancs (jump-cuts)</option>
+    <option value="music">Ajouter une musique (baisse auto sous la voix)</option><option value="text">Titre animé</option><option value="punch">Zooms d'emphase</option>
+    <option value="voice">Changer la voix (grave, aiguë, radio…)</option><option value="loudnorm">Normaliser le volume</option><option value="logo">Ajouter MON logo / filigrane</option>
+    <option value="burn">Incruster des sous-titres (.srt / .ass)</option><option value="stabilize">Stabiliser</option><option value="thumbnail">Meilleure image de couverture</option></select>
+    <div id="tl_trim" class="tlf"><div class="row"><div><label>Début (s ou mm:ss)</label><input id="tl_start" value="0"></div><div><label>Fin (vide = jusqu'au bout)</label><input id="tl_end"></div></div></div>
+    <div id="tl_speed" class="tlf hide"><label>Facteur (1.25 = plus rapide, 0.8 = plus lent)</label><input id="tl_factor" type="number" step="0.05" value="1.25"></div>
+    <div id="tl_music" class="tlf hide"><label>Fichier musique (à toi / libre de droits)</label><input id="tl_track" type="file" accept="audio/*"><label>Volume</label><input id="tl_vol" type="number" step="0.05" value="0.15"></div>
+    <div id="tl_text" class="tlf hide"><label>Texte</label><input id="tl_txt" maxlength="120"><div class="row"><div><label>Position</label><select id="tl_pos"><option value="top">Haut</option><option value="center">Centre</option><option value="bottom">Bas</option></select></div><div><label>Début (s)</label><input id="tl_tstart" value="0"></div></div></div>
+    <div id="tl_punch" class="tlf hide"><label>Instants des zooms (secondes, séparées par des virgules)</label><input id="tl_at" placeholder="3, 12, 20"></div>
+    <div id="tl_voice" class="tlf hide"><label>Voix</label><select id="tl_preset"><option value="deep">Grave</option><option value="low">Un peu plus grave</option><option value="high">Plus aiguë</option><option value="child">Très aiguë</option><option value="radio">Radio</option><option value="echo">Écho</option><option value="robot">Robot</option></select></div>
+    <div id="tl_logo" class="tlf hide"><label>Image du logo (PNG conseillé)</label><input id="tl_img" type="file" accept="image/*"><div class="row"><div><label>Position</label><select id="tl_lpos"><option value="br">Bas droite</option><option value="bl">Bas gauche</option><option value="tr">Haut droite</option><option value="tl">Haut gauche</option><option value="center">Centre</option></select></div><div><label>Taille (0.05–0.6)</label><input id="tl_scale" type="number" step="0.05" value="0.15"></div></div></div>
+    <div id="tl_burn" class="tlf hide"><label>Fichier de sous-titres</label><input id="tl_subs" type="file" accept=".srt,.ass"></div>
+    <button id="gotl">Appliquer</button>
+    <div class="note">Pour assembler plusieurs vidéos avec transitions : <code>./phenix edit concat a.mp4 b.mp4 -o out.mp4 --xfade fade</code>.</div>
+  </div>
+  <div id="p6" class="hide">
+    <h2 style="margin-top:18px">Réglages &amp; diagnostic</h2>
+    <button id="godoc" class="sec">Vérifier l'installation</button>
+    <button id="gotest" class="sec">Auto-test des fonctions (1 à 3 min)</button>
+    <h2 style="margin-top:18px">Envoi direct sur YouTube</h2>
+    <div class="note" id="ytstate">…</div>
+    <label>Fichier client_secret.json (Google Cloud → Identifiants → ID client OAuth « Application de bureau », API YouTube Data v3 activée, gratuit)</label>
+    <input id="secret" type="file" accept=".json">
+    <div class="note">La première fois, une fenêtre Google s'ouvre pour autoriser l'envoi. Les vidéos partent en « privé » par défaut. Voix de synthèse = déclarée comme contenu modifié/synthétique. TikTok : publication manuelle (pas d'API gratuite fiable).</div>
+  </div>
   <div id="p3" class="hide">
     <h2 style="margin-top:18px">2. Améliorer la vidéo</h2>
     <div class="note" id="src3">Utilise « Améliorer ce clip » sous un clip produit, ou la vidéo choisie ci-dessus.</div>
@@ -624,8 +748,12 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
     <button class="sec hide" id="cancel" style="width:auto">Annuler</button>
     <div id="clipsbox" class="hide"></div>
     <div class="grid" id="out"></div>
-    <button class="sec hide" id="pub" style="width:auto">Préparer le dossier de publication (YouTube / TikTok)</button>
+    <button class="sec hide" id="pub" style="width:auto">Préparer le dossier de publication (YouTube / TikTok / boost)</button>
     <div id="pubbox" class="note"></div>
+    <div id="ytbox" class="hide"><label>Envoyer sur YouTube</label>
+      <select id="ytfolder"></select>
+      <select id="ytpriv"><option value="private">Privé (conseillé)</option><option value="unlisted">Non répertorié</option><option value="public">Public</option></select>
+      <button class="sec" id="goyt" style="width:auto">Envoyer</button></div>
     <div class="note hide" id="ai">⚠ Voix de synthèse : active l'étiquette « contenu généré par IA » à la publication. Vérifie tes droits et relis la traduction.</div>
   </div>
   <div class="card" style="margin-top:16px"><h2>Historique</h2><div id="hist" class="note"></div></div>
@@ -636,9 +764,9 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;borde
 const $=id=>document.getElementById(id);let source="",cur=null,timer=null,kind="clips";
 const enc=p=>String(p).split('/').map(encodeURIComponent).join('/');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-fetch('/api/health').then(r=>r.json()).then(h=>{$('health').textContent=(h.ffmpeg?'FFmpeg ✓':'⚠ FFmpeg introuvable')+' · dossier : '+h.workdir});
-function tab(n){kind=['','clips','delogo','enhance','trends'][n];['p1','p2','p3','p4'].forEach((id,i)=>$(id).classList.toggle('hide',n!=i+1));$('srcbox').classList.toggle('hide',n==4)}
-$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);$('t3').onclick=()=>tab(3);$('t4').onclick=()=>tab(4);
+function refreshHealth(){fetch('/api/health').then(r=>r.json()).then(h=>{$('health').textContent=(h.ffmpeg?'FFmpeg ✓':'⚠ FFmpeg introuvable')+' · v'+h.version+' · dossier : '+h.workdir;$('ytstate').textContent=h.youtube_ready?'client_secret.json présent : prêt pour l\'envoi.':'Pas encore de client_secret.json.'})}refreshHealth();
+function tab(n){document.querySelectorAll('.tabs button').forEach((b,i)=>b.classList.toggle('on',i+1==n));kind=['','clips','delogo','enhance','trends','tool','settings'][n];['p1','p2','p3','p4','p5','p6'].forEach((id,i)=>$(id).classList.toggle('hide',n!=i+1));$('srcbox').classList.toggle('hide',n==4||n==6);if(n==6)refreshHealth()}
+tab(1);$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);$('t3').onclick=()=>tab(3);$('t4').onclick=()=>tab(4);$('t5').onclick=()=>tab(5);$('t6').onclick=()=>tab(6);
 const FX={vignette:'Vignette',warm:'Chaud',cool:'Froid',cinema:'Cinéma',vivid:'Éclatant',bw:'Noir & blanc',grain:'Grain',sharpen:'Netteté',glitch:'Glitch',shake:'Tremblement',flash:'Flash',zoomin:'Zoom lent',fade:'Fondu',lowlight:'Éclaircir'};
 $('fxlist').innerHTML=Object.entries(FX).map(([k,v])=>'<label class="chk" style="margin:2px 0"><input type="checkbox" class="fxc" value="'+k+'">'+v+'</label>').join('');
 let enhSrc="";
@@ -649,7 +777,7 @@ $('goenh').onclick=()=>{const o={source:enhSrc||$('url').value.trim()||source,cl
  if(o.bg==='image'&&!bgImg){alert("Choisis l'image de fond.");return}start('enhance',o)};
 $('pub').onclick=async()=>{const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'publish',options:{job:cur}})});const j=await r.json();
  if(j.error){alert(j.error);return}$('pubbox').textContent='Préparation…';const t=setInterval(async()=>{const v=await (await fetch('/api/jobs/'+j.id)).json();
-  if(v.status==='done'){clearInterval(t);poll();$('pubbox').textContent='Dossier prêt : voir les fichiers texte listés ci-dessous (titre, description, hashtags). Dossier : '+'jobs/'+cur+'/out/publish'}
+  if(v.status==='done'){clearInterval(t);poll();ytJob=cur;fillYt(v);$('pubbox').textContent='Dossier prêt : voir les fichiers texte listés ci-dessous (titre, description, hashtags). Dossier : '+'jobs/'+cur+'/out/publish'}
   else if(v.status==='error'){clearInterval(t);$('pubbox').textContent='Échec : '+v.log.slice(-300)}},1500)};
 $('drop').onclick=()=>$('file').click();
 ['dragover','dragenter'].forEach(e=>$('drop').addEventListener(e,ev=>{ev.preventDefault();$('drop').classList.add('on')}));
@@ -673,13 +801,26 @@ $('gotr').onclick=async()=>{const o={links:$('tr_links').value,search:$('tr_sear
  if(!o.links.trim()&&!o.search.trim()){alert('Colle des liens ou écris une recherche.');return}
  const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'trends',options:o})});const j=await r.json();
  if(j.error){alert(j.error);return}cur=j.id;$('trbox').classList.add('hide');$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()};
+
+const TOOLS=['trim','speed','music','text','punch','voice','logo','burn'];
+$('tl').onchange=()=>{TOOLS.forEach(t=>$('tl_'+t).classList.toggle('hide',$('tl').value!==t))};
+let tlUp={};['tl_track:track','tl_img:image','tl_subs:subs'].forEach(s=>{const [id,k]=s.split(':');$(id).onchange=()=>upfile($(id),i=>tlUp[k]=i)});
+$('gotl').onclick=()=>{const t=$('tl').value;const o={tool:t,source:enhSrc||$('url').value.trim()||source,quality:'balanced',start:$('tl_start').value,end:$('tl_end').value,factor:$('tl_factor').value,
+ volume:$('tl_vol').value,track:tlUp.track,text:$('tl_txt').value,position:t==='logo'?$('tl_lpos').value:$('tl_pos').value,punch:'',at:$('tl_at').value,preset:$('tl_preset').value,image:tlUp.image,scale:$('tl_scale').value,subs:tlUp.subs};
+ if(t==='text')o.start=$('tl_tstart').value;start('tool',o)};
+$('godoc').onclick=()=>run0('doctor');$('gotest').onclick=()=>run0('selftest');
+async function run0(k){const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:k,options:{}})});const j=await r.json();if(j.error){alert(j.error);return}cur=j.id;$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()}
+$('secret').onchange=async()=>{const f=$('secret').files[0];if(!f)return;const r=await fetch('/api/secret',{method:'POST',body:await f.text()});const j=await r.json().catch(()=>({}));alert(r.ok?'client_secret.json enregistré.':(j.error||'Échec'));refreshHealth()};
+$('goyt').onclick=async()=>{const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'youtube',options:{job:ytJob,folder:$('ytfolder').value,privacy:$('ytpriv').value}})});const j=await r.json();
+ if(j.error){alert(j.error);return}cur=j.id;$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()};
+let ytJob="";
 $('cancel').onclick=()=>fetch('/api/jobs/'+cur+'/cancel',{method:'POST',body:'{}'});
 function poll(){clearTimeout(timer);if(!cur)return;fetch('/api/jobs/'+cur).then(r=>r.json()).then(v=>{render(v);if(v.status==='running'||v.status==='queued')timer=setTimeout(poll,1500);else hist()})}
 function render(v){const lab={queued:'En attente',running:'En cours…',done:'Terminé',error:'Erreur',cancelled:'Annulé'}[v.status]||v.status;
  const errl=(v.log.split('\n').filter(x=>x.startsWith('[erreur]')).pop()||'');
  $('status').innerHTML='<span class="st '+v.status+'">'+lab+'</span> '+esc(v.id)+(v.status==='error'&&errl?'<br><b style="color:var(--er)">'+esc(errl)+'</b>':'');const l=$('log');l.textContent=v.log;l.scrollTop=l.scrollHeight;
  if(v.status!=='running'&&v.status!=='queued')$('cancel').classList.add('hide');
- const mp=v.outputs.filter(o=>o.type==='mp4'),oth=v.outputs.filter(o=>o.type!=='mp4'&&o.type!=='jpg');
+ const mp=v.outputs.filter(o=>o.type==='mp4'),oth=v.outputs.filter(o=>o.type!=='mp4'&&(o.type!=='jpg'||v.kind==='tool'));
  $('out').innerHTML=mp.map(o=>'<div class="v"><video controls preload="metadata" src="/files/'+v.id+'/'+enc(o.path)+'"></video><div class="note">'+esc(o.name)+' · '+(o.size/1048576).toFixed(1)+' Mo</div><a href="/files/'+v.id+'/'+enc(o.path)+'?dl=1">Télécharger</a>'+(v.kind==='clips'?' · <a href="#" class="enh" data-s="job:'+v.id+'/'+enc(o.path)+'">Améliorer ce clip</a>':'')+'</div>').join('')
  +oth.map(o=>'<div class="v"><a href="/files/'+v.id+'/'+enc(o.path)+'" target="_blank">'+esc(o.name)+'</a></div>').join('');
  $('pub').classList.toggle('hide',!(v.status==='done'&&v.kind==='clips'&&mp.length));
@@ -691,6 +832,8 @@ function render(v){const lab={queued:'En attente',running:'En cours…',done:'Te
   cb.innerHTML='<table><tr><th>#</th><th>Début–fin</th><th>Titre / extrait</th></tr>'+v.clips.clips.map(c=>'<tr><td>'+esc(c.id??'')+'</td><td>'+Math.round(c.start)+'–'+Math.round(c.end)+' s</td><td><b>'+esc(c.title||'')+'</b><br>'+esc((c.text||'').slice(0,160))+'</td></tr>').join('')+'</table>'}}
 function hist(){fetch('/api/history').then(r=>r.json()).then(h=>{$('hist').innerHTML=h.length?h.map(x=>'<a href="#" data-id="'+x.id+'" style="color:var(--ac)">'+x.id+'</a> · '+x.status).join('<br>'):'Aucun travail.';
  document.querySelectorAll('#hist a').forEach(a=>a.onclick=e=>{e.preventDefault();cur=a.dataset.id;$('log').classList.remove('hide');poll()})})}
+function fillYt(v){fetch('/api/jobs/'+cur).then(r=>r.json()).then(w=>{const fs=[...new Set(w.outputs.filter(o=>o.path.includes('publish/')&&o.name==='youtube.txt').map(o=>o.path.split('/')[2]))];
+ $('ytfolder').innerHTML=fs.map(f=>'<option>'+esc(f)+'</option>').join('');$('ytbox').classList.toggle('hide',!fs.length)})}
 hist();
 if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
 </script></body></html>

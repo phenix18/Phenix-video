@@ -90,7 +90,9 @@ Par défaut les clips font **75 s minimum (1 min 15) et 180 s maximum**, cible 1
 | Stabiliser | `edit.py stabilize in.mp4 -o out.mp4` (nécessite libvidstab) |
 | Miniature | `edit.py thumbnail in.mp4 -o cover.jpg` |
 
-Scripts unitaires : `fetch.py`, `polish.py`, `fx.py`, `background.py`, `characters.py`, `enhance.py`, `publish.py`, `youtube_upload.py`, `app.py`, `transcribe.py`, `highlights.py`, `translate.py`, `dub.py`, `captions.py`, `render.py` (chacun a `--help`).
+Application PC : `desktop.py` (fenêtre dédiée, raccourcis Windows/Linux, `PhenixVideo.exe`/installateur via GitHub Actions) ; l'interface couvre clips & doublage, masquage de marque, amélioration, tendances, outils de montage (edit.py), réglages (diagnostic, auto-test, YouTube).
+
+Scripts unitaires : `desktop.py`, `fetch.py`, `polish.py`, `fx.py`, `background.py`, `characters.py`, `enhance.py`, `publish.py`, `youtube_upload.py`, `app.py`, `transcribe.py`, `highlights.py`, `translate.py`, `dub.py`, `captions.py`, `render.py` (chacun a `--help`).
 
 ## Application locale et masquage de ta marque
 

@@ -1,5 +1,11 @@
 # Journal des versions — Phenix-video (© 2026 Phenix - kcw)
 
+## 1.4.0
+
+- **Application PC** : `scripts/desktop.py` ouvre Phenix-video dans sa propre fenêtre (pywebview, sinon mode application Edge/Chrome, sinon navigateur). Icône originale, raccourcis Windows (Bureau + menu Démarrer) et Linux (`./phenix desktop --install-shortcut`).
+- Windows : `PhenixVideo.exe` sans console après installation, installateur `Phenix-video-Setup.exe` (Inno Setup) construit par GitHub Actions, scripts .bat mis à jour.
+- Interface : nouveaux onglets **Outils** (couper, vitesse, jump-cuts, musique, titre, zooms, voix, volume, logo, sous-titres, stabilisation, miniature) et **Réglages** (diagnostic, auto-test, client_secret.json), bouton d'envoi YouTube après le dossier de publication, onglets en grille (plus de débordement), icône PWA PNG.
+
 ## 1.3.1
 
 - Correctif : le lien « Télécharger » / la lecture d'un clip échouait quand le nom du fichier contenait `#`, des emoji ou des espaces (titres TikTok). Les liens sont maintenant encodés correctement.

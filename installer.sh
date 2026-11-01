@@ -17,5 +17,9 @@ pip install --default-timeout=120 --resume-retries 10 torch --index-url https://
 pip install --default-timeout=120 --resume-retries 10 -r requirements.txt
 chmod +x phenix update.sh lancer.sh 2>/dev/null || true
 python scripts/doctor.py || true
+python scripts/desktop.py --install-shortcut || true
 echo
-echo "Installation terminée. Lance :  ./phenix app --no-browser   puis ouvre http://127.0.0.1:8765"
+echo "Installation terminée."
+echo "  Application PC (fenêtre dédiée) :  ./phenix desktop        (ou l'entrée « Phenix-video » du menu)"
+echo "  Dans le navigateur              :  ./phenix app --no-browser   puis http://127.0.0.1:8765"
+echo "  Sous WSL : la fenêtre s'affiche avec WSLg (Windows 11) ; sinon utilise le navigateur Windows."

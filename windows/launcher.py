@@ -3,7 +3,9 @@
 
 Premier lancement : vérifie Python et FFmpeg (les installe avec winget si besoin), crée un environnement dans
 %LOCALAPPDATA%\\PhenixVideo, installe les dépendances (PyTorch CPU d'abord), puis démarre l'application locale.
-Lancements suivants : démarre directement. Options passées à l'application (ex. --lan pour le téléphone).
+Crée des raccourcis (Bureau + menu Démarrer) avec l'icône Phenix-video, puis ouvre l'application dans sa propre fenêtre
+(scripts/desktop.py : fenêtre native si pywebview est installé, sinon mode application d'Edge/Chrome).
+Lancements suivants : démarre directement, sans console. Options passées à l'application (ex. --lan pour le téléphone).
 Le .exe doit rester à côté du dossier `scripts` (il est livré ainsi dans l'archive Windows).
 """
 from __future__ import annotations
@@ -52,6 +54,23 @@ def winget(pkg: str) -> bool:
                            "--accept-package-agreements"]).returncode == 0
 
 
+def make_shortcuts() -> None:
+    """Raccourcis Bureau + menu Démarrer (PowerShell, sans droits administrateur)."""
+    target = sys.executable if getattr(sys, "frozen", False) else str(BASE / "windows" / "launcher.py")
+    icon = BASE / "assets" / "icon.ico"
+    ps = (
+        "$w=New-Object -ComObject WScript.Shell;"
+        "foreach($d in @([Environment]::GetFolderPath('Desktop'),(Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'))){"
+        f"$l=$w.CreateShortcut((Join-Path $d 'Phenix-video.lnk'));$l.TargetPath='{target}';"
+        f"$l.WorkingDirectory='{BASE}';$l.IconLocation='{icon}';$l.Description='Phenix-video';$l.Save()}}"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=60)
+        say("Raccourcis créés : Bureau et menu Démarrer.")
+    except (OSError, subprocess.TimeoutExpired):
+        say("Raccourcis non créés (non bloquant).")
+
+
 def main() -> None:
     if not (BASE / "scripts" / "app.py").is_file():
         stop(f"Dossier « scripts » introuvable à côté de l'exécutable ({BASE}). Dézippe toute l'archive avant de lancer.")
@@ -78,8 +97,17 @@ def main() -> None:
             if subprocess.run(step).returncode != 0:
                 shutil.rmtree(VENV, ignore_errors=True)  # évite un environnement à moitié installé
                 stop("Échec du téléchargement (réseau ?). Relance PhenixVideo.exe pour reprendre.")
-    say("Démarrage… (ferme cette fenêtre pour arrêter l'application)")
-    sys.exit(subprocess.call([str(vpy), str(BASE / "scripts" / "app.py"), *sys.argv[1:]]))
+    marker = HOME / ".desktop_ready"
+    if not marker.is_file():
+        say("Fenêtre native (facultatif)…")
+        subprocess.run([str(vpy), "-m", "pip", "install", "--default-timeout=120", "pywebview"], capture_output=True)  # échec toléré
+        make_shortcuts()
+        marker.write_text("1", encoding="utf-8")
+    pyw = VENV / "Scripts" / "pythonw.exe"
+    exe = str(pyw if pyw.is_file() else vpy)
+    say("Ouverture de Phenix-video…")
+    flags = 0x00000008 | 0x08000000  # DETACHED_PROCESS | CREATE_NO_WINDOW : l'appli vit sans console
+    subprocess.Popen([exe, str(BASE / "scripts" / "desktop.py"), *sys.argv[1:]], creationflags=flags, close_fds=True)
 
 
 if __name__ == "__main__":

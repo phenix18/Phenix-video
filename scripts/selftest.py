@@ -91,6 +91,39 @@ def main() -> int:
     check("analyse de tendances (rapport + idées)", rc == 0 and (work / "tr" / "TENDANCES.md").exists()
           and (work / "tr" / "idees.md").exists(), out[-300:])
 
+    # 5) application : démarrage du serveur + outil de montage via l'API + fenêtre (navigateur factice)
+    import json as _j2, os as _os, time as _t, urllib.request as _u
+    wd = work / "app"
+    (wd / "uploads").mkdir(parents=True, exist_ok=True)
+    if mp4:
+        import shutil as _sh
+        _sh.copy2(mp4[0], wd / "uploads" / "v.mp4")
+    srv = subprocess.Popen([*PY, str(HERE / "app.py"), "--port", "8899", "--no-browser", "--workdir", str(wd)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        base, ok_app, detail = "http://127.0.0.1:8899", False, ""
+        for _ in range(40):
+            try:
+                _u.urlopen(base + "/api/health", timeout=1).read()
+                break
+            except Exception:  # noqa: BLE001
+                _t.sleep(0.25)
+        rq = _u.Request(base + "/api/jobs", data=_j2.dumps({"kind": "tool", "options": {"tool": "speed", "factor": "1.2", "source": "v.mp4",
+                        "quality": "fast"}}).encode(), method="POST")
+        jid = _j2.loads(_u.urlopen(rq).read())["id"]
+        for _ in range(120):
+            _t.sleep(1)
+            v = _j2.loads(_u.urlopen(base + "/api/jobs/" + jid).read())
+            if v["status"] not in ("running", "queued"):
+                break
+        ok_app = v["status"] == "done" and any(o["name"] == "resultat.mp4" for o in v["outputs"])
+        detail = v["log"][-200:]
+    except Exception as exc:  # noqa: BLE001
+        ok_app, detail = False, str(exc)
+    finally:
+        srv.terminate()
+    check("application : serveur + outil de montage (API)", ok_app, detail)
+
     ok = sum(1 for _, k, _ in results if k)
     print(f"\n{ok}/{len(results)} tests réussis en {time.time() - t0:.0f} s (fichiers : {work})")
     return 0 if ok == len(results) else 1
