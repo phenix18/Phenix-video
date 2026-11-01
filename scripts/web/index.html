@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phenix-video</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.png">
+<meta name="theme-color" content="#ff7a18">
+<link rel="stylesheet" href="/static/app.css">
+<script>try{var t=localStorage.getItem("pv_theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Menu principal">
+    <div class="brand">
+      <img src="/static/img/logo.png" alt="" width="40" height="40">
+      <div><b>Phenix-video</b><small>v{{VERSION}} · local &amp; gratuit</small></div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <div id="health" class="health" role="status">…</div>
+      <small>© 2026 Phenix - kcw</small>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <div class="content">
+    <header class="top">
+      <button class="icon-btn burger" id="burger" aria-label="Ouvrir le menu">☰</button>
+      <div class="crumbs"><h1 id="title">Accueil</h1><p id="subtitle"></p></div>
+      <div class="top-actions">
+        <span id="runpill" class="pill hide" role="status"></span>
+        <button class="icon-btn" id="theme" aria-label="Changer de thème" title="Thème clair / sombre">◐</button>
+      </div>
+    </header>
+    <main id="main" tabindex="-1"></main>
+  </div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+<script src="/static/pages.js"></script>
+<script src="/static/boot.js"></script>
+</body>
+</html>

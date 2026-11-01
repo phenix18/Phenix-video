@@ -13,6 +13,9 @@ case "${1:-help}" in
   publish)  shift; exec $PY scripts/publish.py "$@" ;;
   desktop)  shift; exec $PY scripts/desktop.py "$@" ;;
   trends)   shift; exec $PY scripts/trends.py "$@" ;;
+  insights) shift; exec $PY scripts/insights.py "$@" ;;
+  tiktok)   shift; exec $PY scripts/tiktok_upload.py "$@" ;;
+  youtube)  shift; exec $PY scripts/youtube_upload.py "$@" ;;
   edit)     shift; exec $PY scripts/edit.py "$@" ;;
   fx)       shift; exec $PY scripts/fx.py "$@" ;;
   update)   exec ./update.sh ;;
@@ -22,6 +25,8 @@ Phenix-video — commandes :
   ./phenix app [--port 9000] [--no-browser]   interface web locale (http://127.0.0.1:8765)
   ./phenix doctor                              diagnostic de l'installation
   ./phenix trends LIEN… -o tendances --theme "mon sujet"   analyse de vidéos virales (style, hashtags, idées)
+  ./phenix insights profile LIEN -o analyse   analyse de profil : meilleurs jours/heures, niche, planning .ics (aussi : niches, plan)
+  ./phenix tiktok|youtube --from-folder DOSSIER   envoi direct (connexion : page « Comptes » de l'app, ou youtube --login)
   ./phenix desktop                             application PC (fenêtre dédiée) ; ./phenix desktop --install-shortcut = entrée de menu
   ./phenix selftest                            auto-test des fonctions (1 à 3 minutes)
   ./phenix clips VIDEO|LIEN -o DOSSIER ...     clips, traduction, doublage (--help pour les options)

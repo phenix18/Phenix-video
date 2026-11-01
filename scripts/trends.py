@@ -67,8 +67,10 @@ def _entry(info: dict, url: str) -> dict:
     desc = (info.get("description") or "").strip()
     ts = info.get("timestamp")
     hour = None
+    weekday = None
     if ts:
-        hour = dt.datetime.fromtimestamp(int(ts), tz=dt.timezone.utc).hour
+        d_utc = dt.datetime.fromtimestamp(int(ts), tz=dt.timezone.utc)
+        hour, weekday = d_utc.hour, d_utc.weekday()
     tags = _hashtags(title, desc) or [t.lower().lstrip("#") for t in (info.get("tags") or [])][:12]
     views = info.get("view_count") or 0
     likes = info.get("like_count") or 0
@@ -79,7 +81,9 @@ def _entry(info: dict, url: str) -> dict:
         "views": int(views), "likes": int(likes), "comments": int(comments),
         "shares": int(info.get("repost_count") or 0),
         "engagement": round((likes + comments) / views, 4) if views else None,
-        "hashtags": tags, "hour_utc": hour,
+        "hashtags": tags, "hour_utc": hour, "weekday_utc": weekday, "timestamp": int(ts) if ts else None,
+        "upload_date": info.get("upload_date"), "followers": info.get("channel_follower_count"),
+        "channel": info.get("channel") or info.get("uploader"),
         "width": info.get("width"), "height": info.get("height"), "fps": info.get("fps"),
     }
 

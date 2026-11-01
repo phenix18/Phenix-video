@@ -15,6 +15,7 @@ import json
 import mimetypes
 import os
 import hmac
+import html
 import re
 import secrets
 import shutil
@@ -31,6 +32,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 HERE = Path(__file__).resolve().parent
+WEB = HERE / "web"
+sys.path.insert(0, str(HERE))
+import accounts  # noqa: E402
+from common import StudioError  # noqa: E402
 MAX_UPLOAD = 8 * 1024 ** 3  # 8 Go
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 # Mode réseau local (--lan) : accès depuis un téléphone du même Wi-Fi, protégé par un code PIN.
@@ -40,19 +45,12 @@ TOKENS: set[str] = set()
 FAILS: dict[str, tuple[int, float]] = {}  # ip -> (échecs, bloqué jusqu'à)
 
 MANIFEST = json.dumps({"name": "Phenix-video", "short_name": "Phenix", "start_url": "/", "display": "standalone",
-                       "background_color": "#0f1115", "theme_color": "#f5b301",
+                       "background_color": "#0e1016", "theme_color": "#ff7a18",
                        "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-                                 {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-                                 {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]})
-ICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#0f1115"/>'
-        '<polygon points="22,48 20,14 40,30" fill="#f5b301"/><polygon points="78,48 80,14 60,30" fill="#f5b301"/>'
-        '<ellipse cx="50" cy="52" rx="28" ry="26" fill="#2e2622" stroke="#f5b301" stroke-width="3"/>'
-        '<polygon points="38,56 62,56 56,74 44,74" fill="#f0e1cd"/><polygon points="45,56 55,56 50,63" fill="#181212"/>'
-        '<circle cx="39" cy="44" r="6" fill="#fff"/><circle cx="61" cy="44" r="6" fill="#fff"/>'
-        '<circle cx="40" cy="45" r="3" fill="#181212"/><circle cx="62" cy="45" r="3" fill="#181212"/></svg>')
+                                 {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]})
 SW = "self.addEventListener('fetch',()=>{});"  # service worker minimal : rend l'application installable
 LOGIN = ('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-         '<title>Phenix-video</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.png"><meta name="theme-color" content="#f5b301">'
+         '<title>Phenix-video</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.png"><meta name="theme-color" content="#ff7a18">'
          '<style>body{margin:0;background:#0f1115;color:#e8eaf0;font:16px system-ui;display:grid;place-items:center;min-height:100vh}'
          'form{background:#181b22;border:1px solid #2a2f3a;border-radius:14px;padding:24px;width:min(320px,90vw);text-align:center}'
          'input{width:100%;padding:12px;border-radius:8px;border:1px solid #2a2f3a;background:#0f1218;color:#fff;font-size:22px;'
@@ -128,6 +126,45 @@ def build_command(kind: str, opt: dict, out_dir: Path) -> list[str]:
             raise ValueError("Ajoute d'abord ton fichier client_secret.json (onglet Réglages).")
         return [*py, str(HERE / "youtube_upload.py"), "--from-folder", str(target), "--client-secret", str(secret),
                 "--privacy", choice(opt.get("privacy"), ["private", "unlisted", "public"], "private")]
+    if kind == "yt_login":
+        secret = WORKDIR / "client_secret.json"
+        if not secret.is_file():
+            raise ValueError("Ajoute d'abord ton fichier client_secret.json (page Comptes).")
+        return [*py, str(HERE / "youtube_upload.py"), "--login", "--client-secret", str(secret)]
+    if kind == "tiktok":
+        jid, folder = opt.get("job", ""), opt.get("folder", "")
+        base = (job_dir(jid) / "out" / "publish") if re.fullmatch(r"[\w-]+", jid) else None
+        target = (base / folder).resolve() if base else None
+        if not target or base.resolve() not in target.parents or not (target / "video.mp4").is_file():
+            raise ValueError("Dossier de publication introuvable : prépare d'abord le dossier de publication.")
+        cmd = [*py, str(HERE / "tiktok_upload.py"), "--from-folder", str(target),
+               "--mode", choice(opt.get("mode"), ["inbox", "direct"], "inbox"),
+               "--privacy", choice(opt.get("privacy"), ["SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE"], "SELF_ONLY")]
+        if opt.get("caption"):
+            cmd += ["--caption", str(opt["caption"])[:2200]]
+        return cmd
+    if kind in ("insights_profile", "insights_niches", "insights_plan"):
+        sub = kind.split("_", 1)[1]
+        cmd = [*py, str(HERE / "insights.py"), sub,
+               "-o", str(out_dir / "analyse"), "--tz", str(num(opt.get("tz"), 0, -12, 14)),
+               "--per-week", str(int(num(opt.get("per_week"), 4, 1, 14)))]
+        if opt.get("theme"):
+            cmd += ["--theme", str(opt["theme"])[:80]]
+        if sub == "profile":
+            url = str(opt.get("url", "")).strip()
+            if not re.match(r"^https?://", url):
+                raise ValueError("Colle le lien du profil (https://…).")
+            cmd += ["--n", str(int(num(opt.get("n"), 25, 5, 60))), url]
+        elif sub == "niches":
+            kw = str(opt.get("keywords", "")).strip()[:300]
+            cmd += ["--n", str(int(num(opt.get("n"), 8, 3, 20)))]
+            cmd += ["--keywords", kw] if kw else ["--seeds"]
+        else:
+            jid = opt.get("job", "")
+            src = job_dir(jid) / "analyse" / "insights.json" if re.fullmatch(r"[\w-]+", str(jid)) else None
+            if src and src.is_file():
+                cmd += ["--from-json", str(src)]  # sinon : planning générique (créneaux usuels)
+        return cmd
     if kind == "trends":
         links = [l.strip() for l in re.split(r"[\s,]+", str(opt.get("links", ""))) if l.strip()][:30]
         if any(not re.match(r"^https?://", l) for l in links):
@@ -320,9 +357,9 @@ def list_outputs(job_id: str) -> list[dict]:
     for p in sorted(d.rglob("*")):
         if not p.is_file() or p.name.startswith("."):
             continue
-        if p.suffix.lower() in (".mp4", ".jpg", ".md", ".json", ".txt") and ".tight" not in p.name and p.name != "log.txt" \
+        if p.suffix.lower() in (".mp4", ".jpg", ".md", ".json", ".txt", ".ics") and ".tight" not in p.name and p.name != "log.txt" \
                 and p.name not in ("options.json",):
-            if p.suffix == ".json" and p.name not in ("clips.json", "report.json", "trends.json"):
+            if p.suffix == ".json" and p.name not in ("clips.json", "report.json", "trends.json", "insights.json"):
                 continue
             if p.suffix == ".txt" and "publish" not in p.parts:
                 continue
@@ -350,8 +387,13 @@ def job_view(job_id: str) -> dict | None:
             clips = json.loads(cj.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             clips = None
-    return {"id": job_id, "status": status, "log": log, "outputs": list_outputs(job_id), "clips": clips,
-            "kind": (job or {}).get("kind", "")}
+    kind = (job or {}).get("kind", "")
+    if not kind:
+        try:
+            kind = json.loads((d / "options.json").read_text(encoding="utf-8")).get("kind", "")
+        except (OSError, ValueError):
+            kind = ""
+    return {"id": job_id, "status": status, "log": log, "outputs": list_outputs(job_id), "clips": clips, "kind": kind}
 
 
 def history() -> list[dict]:
@@ -361,7 +403,13 @@ def history() -> list[dict]:
         for d in sorted(root.iterdir(), reverse=True)[:30]:
             if d.is_dir():
                 j = JOBS.get(d.name)
-                out.append({"id": d.name, "status": j["status"] if j else "done"})
+                kind = (j or {}).get("kind", "")
+                if not kind:
+                    try:
+                        kind = json.loads((d / "options.json").read_text(encoding="utf-8")).get("kind", "")
+                    except (OSError, ValueError):
+                        kind = ""
+                out.append({"id": d.name, "status": j["status"] if j else "done", "kind": kind})
     return out
 
 
@@ -409,7 +457,7 @@ class Handler(BaseHTTPRequestHandler):
         self._err(401, "Code incorrect.")
 
     def _static(self, path: str) -> bool:
-        files = {"/manifest.webmanifest": ("application/manifest+json", MANIFEST), "/icon.svg": ("image/svg+xml", ICON),
+        files = {"/manifest.webmanifest": ("application/manifest+json", MANIFEST),
                  "/sw.js": ("application/javascript", SW)}
         if path in ("/icon-192.png", "/icon-512.png", "/favicon.png"):
             png = HERE.parent / "assets" / ("icon-192.png" if path != "/icon-512.png" else "icon-512.png")
@@ -461,6 +509,8 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(url.path)
         if self._static(path):
             return
+        if path == "/tiktok/callback":  # protégé par l'état PKCE secret ; le navigateur de retour n'a pas toujours le cookie
+            return self._tiktok_callback(parse_qs(url.query))
         if not self._authed():
             if path == "/":
                 body = LOGIN.encode("utf-8")
@@ -472,12 +522,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             return self._err(401, "Non autorisé.")
         if path == "/":
-            body = PAGE.encode("utf-8")
+            try:
+                body = (WEB / "index.html").read_text(encoding="utf-8").replace("{{VERSION}}", VERSION).encode("utf-8")
+            except OSError:
+                return self._err(500, "Interface introuvable (dossier scripts/web manquant).")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif path.startswith("/static/"):
+            self._serve_static(path[len("/static/"):])
+        elif path == "/api/accounts":
+            self._json(accounts.status())
         elif path == "/api/history":
             self._json(history())
         elif path == "/api/health":
@@ -519,9 +577,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._upload(parse_qs(url.query).get("name", ["video"])[0])
             n = int(self.headers.get("Content-Length") or 0)
             data = json.loads(self.rfile.read(n) or b"{}")
+            if path.startswith("/api/accounts/"):
+                return self._accounts_post(path[len("/api/accounts/"):], data)
             if path == "/api/jobs":
                 kind = data.get("kind", "clips")
-                if kind not in ("clips", "delogo", "enhance", "publish", "trends", "tool", "doctor", "selftest", "youtube"):
+                if kind not in ("clips", "delogo", "enhance", "publish", "trends", "tool", "doctor", "selftest", "youtube",
+                                "tiktok", "yt_login", "insights_profile", "insights_niches", "insights_plan"):
                     return self._err(400, "Type de travail inconnu.")
                 return self._json({"id": start_job(kind, data.get("options", {}))})
             if m := re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path):
@@ -535,6 +596,70 @@ class Handler(BaseHTTPRequestHandler):
             self._err(400, str(exc))
         except Exception as exc:  # noqa: BLE001
             self._err(500, f"Erreur interne : {exc}")
+
+    def _local_only(self) -> bool:
+        """Les connexions de comptes ne sont autorisées que depuis cet ordinateur (pas depuis le téléphone en mode --lan)."""
+        return self.client_address[0] in ("127.0.0.1", "::1")
+
+    def _serve_static(self, rel: str) -> None:
+        target = (WEB / rel).resolve()
+        if WEB.resolve() not in target.parents or not target.is_file():
+            return self._err(404, "Introuvable.")
+        body = target.read_bytes()
+        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if target.suffix in (".js", ".css", ".html"):
+            ctype += "; charset=utf-8"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _tiktok_callback(self, q: dict) -> None:
+        if not self._local_only():
+            return self._err(403, "Connexion de compte : seulement depuis l'ordinateur.")
+        try:
+            if "error" in q:
+                raise StudioError(f"TikTok a refusé l'autorisation : {q['error'][0]}")
+            info = accounts.tiktok_complete(self.path.split("?", 1)[1] if "?" in self.path else "")
+            msg = f"Compte TikTok connecté{' : ' + info['nickname'] if info.get('nickname') else ''}. Tu peux fermer cet onglet et revenir à Phenix-video."
+            ok = True
+        except StudioError as exc:
+            msg, ok = str(exc), False
+        page = (f'<!doctype html><meta charset="utf-8"><title>Phenix-video</title><body style="font:18px system-ui;background:#0e1016;'
+                f'color:#eee;display:grid;place-items:center;min-height:100vh;margin:0"><div style="max-width:520px;padding:24px;text-align:center">'
+                f'<h2 style="color:{"#7ee787" if ok else "#ff7b72"}">{"Connexion réussie" if ok else "Connexion impossible"}</h2><p>{html.escape(msg)}</p></div>').encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(page)))
+        self.end_headers()
+        self.wfile.write(page)
+
+    def _accounts_post(self, action: str, data: dict) -> None:
+        if not self._local_only():
+            return self._err(403, "Connexion de compte : seulement depuis l'ordinateur.")
+        try:
+            if action == "youtube/logout":
+                import youtube_upload
+                youtube_upload.logout()
+            elif action == "tiktok/config":
+                accounts.tiktok_save_app(str(data.get("client_key", "")), str(data.get("client_secret", "")),
+                                         str(data.get("redirect_uri", "")))
+            elif action == "tiktok/connect":
+                modes = [m for m in data.get("modes", ["upload"]) if m in ("upload", "publish")] or ["upload"]
+                url = accounts.tiktok_auth_url(modes)
+                threading.Timer(0.2, lambda: webbrowser.open(url)).start()
+                return self._json({"ok": True, "url": url})
+            elif action == "tiktok/complete":
+                return self._json({"ok": True, **accounts.tiktok_complete(str(data.get("value", "")))})
+            elif action == "tiktok/logout":
+                accounts.tiktok_logout()
+            else:
+                return self._err(404, "Introuvable.")
+            self._json({"ok": True})
+        except StudioError as exc:
+            self._err(400, str(exc))
 
     def _upload(self, name: str):
         n = int(self.headers.get("Content-Length") or 0)
@@ -601,243 +726,6 @@ class Handler(BaseHTTPRequestHandler):
                     left -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
-
-
-PAGE = r"""<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Phenix-video</title>
-<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/favicon.png"><meta name="theme-color" content="#f5b301">
-<style>
-:root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--tx:#e8eaf0;--mut:#8b93a7;--ac:#f5b301;--ok:#3ecf8e;--er:#ff5d5d}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
-header{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
-h1{font-size:18px;margin:0}header small{color:var(--mut)}
-main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,380px) minmax(0,1fr)}
-@media(max-width:860px){main{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
-h2{font-size:14px;margin:0 0 12px;color:var(--ac);text-transform:uppercase;letter-spacing:.06em}
-label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
-input,select,textarea{width:100%;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit}
-input[type=checkbox]{width:auto;margin-right:8px}.chk{display:flex;align-items:center;margin:8px 0;color:var(--tx);font-size:14px}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-button{background:var(--ac);color:#111;border:0;border-radius:8px;padding:11px 14px;font-weight:700;cursor:pointer;width:100%;margin-top:14px;font:inherit;font-weight:700}
-button.sec{background:transparent;color:var(--tx);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:not-allowed}
-.drop{border:2px dashed var(--line);border-radius:10px;padding:16px;text-align:center;color:var(--mut);cursor:pointer}
-.drop.on{border-color:var(--ac);color:var(--tx)}
-pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:240px;overflow:auto;font-size:12px;white-space:pre-wrap;margin:10px 0 0}
-.st{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;background:#22262f}
-.st.done{color:var(--ok)}.st.error{color:var(--er)}.st.running{color:var(--ac)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:12px}
-.v{background:#0f1218;border:1px solid var(--line);border-radius:10px;padding:8px}
-.v video{width:100%;aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:6px}
-.v a{color:var(--ac);font-size:12px;word-break:break-all}.note{font-size:12px;color:var(--mut);margin-top:10px}
-table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px}.tabs button{margin:0;padding:8px 4px;font-size:13px}.tabs button.on{background:var(--ac);color:#111;border-color:var(--ac)}.hide{display:none}
-.bar{height:6px;background:#0f1218;border-radius:4px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;background:var(--ac);width:0}
-</style></head><body>
-<header><h1>Phenix-video</h1><small>100 % local · gratuit · rien n'est envoyé sur Internet</small>
-<small id="health"></small></header>
-<main>
-<section class="card">
-  <div class="tabs"><button class="sec" id="t1">Clips &amp; doublage</button><button class="sec" id="t2">Masquer ma marque</button><button class="sec" id="t3">Améliorer</button><button class="sec" id="t4">Tendances</button><button class="sec" id="t5">Outils</button><button class="sec" id="t6">Réglages</button></div>
-  <div id="srcbox">
-
-  <h2>1. Vidéo</h2>
-  <div class="drop" id="drop">Glisse ta vidéo ici ou clique pour choisir<input id="file" type="file" accept="video/*" hidden></div>
-  <div class="bar"><i id="up"></i></div>
-  <label>…ou un lien (ta propre vidéo, ou avec autorisation)</label>
-  <input id="url" placeholder="https://www.youtube.com/watch?v=…">
-  <div class="note" id="src">Aucune source.</div></div>
-
-  <div id="p1">
-  <h2 style="margin-top:18px">2. Montage</h2>
-  <div class="row"><div><label>Nombre de clips</label><input id="clips" type="number" value="5" min="1" max="20"></div>
-  <div><label>Format</label><select id="aspect"><option>9:16</option><option>16:9</option><option>1:1</option><option>4:5</option></select></div></div>
-  <div class="row"><div><label>Durée min (s)</label><input id="min" type="number" value="75"></div>
-  <div><label>Durée max (s)</label><input id="max" type="number" value="180"></div></div>
-  <div class="chk"><input id="short" type="checkbox">Clips courts (20–60 s)</div>
-  <div class="chk"><input id="tighten" type="checkbox" checked>Couper les blancs (rythme dynamique)</div>
-  <div class="row"><div><label>Sous-titres</label><select id="style"><option value="pop">Pop (mot jaune)</option><option value="karaoke">Karaoké</option><option value="clean">Bandeau</option><option value="minimal">Minimal</option></select></div>
-  <div><label>Qualité</label><select id="quality"><option value="balanced">Équilibrée</option><option value="high">Haute</option><option value="max">Maximale</option><option value="fast">Rapide</option></select></div></div>
-
-  <h2 style="margin-top:18px">3. Langue &amp; voix</h2>
-  <label>Traduire vers</label>
-  <select id="to"><option value="">Garder la langue d'origine</option><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option><option value="pt">Portugais</option><option value="de">Allemand</option><option value="ar">Arabe</option></select>
-  <div class="chk"><input id="dub" type="checkbox" checked>Remplacer la voix (voix off de synthèse)</div>
-  <div class="row"><div><label>Voix</label><select id="voice"><option value="female">Féminine</option><option value="male">Masculine</option><option value="both">Les deux (2 versions)</option></select></div>
-  <div><label>Son d'origine</label><select id="bg"><option value="duck">Baissé</option><option value="none">Supprimé</option><option value="keep">Gardé</option></select></div></div>
-  <button id="go">Lancer</button>
-  <button class="sec" id="an">Analyser seulement (voir les moments choisis)</button>
-  </div>
-
-  <div id="p2" class="hide">
-    <h2 style="margin-top:18px">2. Zones de TA marque</h2>
-    <div class="chk"><input class="ar" type="checkbox" value="tl">Haut gauche</div>
-    <div class="chk"><input class="ar" type="checkbox" value="tr">Haut droite</div>
-    <div class="chk"><input class="ar" type="checkbox" value="bl">Bas gauche</div>
-    <div class="chk"><input class="ar" type="checkbox" value="br" checked>Bas droite</div>
-    <label>Méthode</label><select id="method"><option value="blur">Flou</option><option value="delogo">Effacement doux</option><option value="box">Bandeau noir</option></select>
-    <button id="godl">Masquer</button>
-    <div class="note">À utiliser pour ton propre logo ou nom de compte. Ne retire pas le crédit d'un autre créateur : c'est contraire aux règles des plateformes et à son droit d'auteur.</div>
-  </div>
-  <div id="p4" class="hide">
-    <h2 style="margin-top:18px">Analyser des vidéos virales</h2>
-    <div class="note">Colle des liens (un par ligne) de vidéos qui marchent dans ta niche (TikTok, YouTube, Instagram…). Phenix-video lit les infos publiques (titre, durée, vues, hashtags) et en tire la formule : durée, formes d'accroche, hashtags, idées de titres pour TON sujet. Il ne copie pas les vidéos.</div>
-    <label>Liens</label><textarea id="tr_links" rows="5" placeholder="https://www.tiktok.com/@…/video/…&#10;https://www.youtube.com/shorts/…"></textarea>
-    <label>…ou recherche YouTube (si aucun lien)</label><input id="tr_search" placeholder="astuces argent">
-    <div class="row"><div><label>Ton sujet</label><input id="tr_theme" placeholder="ex. l'argent, le football, la cuisine"></div>
-    <div><label>Langue des idées</label><select id="tr_lang"><option value="fr">Français</option><option value="en">Anglais</option></select></div></div>
-    <label>Traduire les titres proposés vers</label>
-    <select id="tr_to"><option value="">Non</option><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option><option value="pt">Portugais</option><option value="de">Allemand</option><option value="ar">Arabe</option></select>
-    <div class="chk"><input id="tr_deep" type="checkbox">Analyse approfondie (télécharge en basse définition : accroche parlée + rythme de montage, plus lent)</div>
-    <button id="gotr">Analyser les tendances</button>
-    <div class="note">Ce sont des corrélations, pas une recette garantie. Inspire-toi de la formule, refais ton propre contenu.</div>
-    <pre id="trbox" class="hide" style="white-space:pre-wrap;max-height:480px;overflow:auto"></pre>
-  </div>
-  <div id="p5" class="hide">
-    <h2 style="margin-top:18px">2. Outil de montage</h2>
-    <label>Outil</label>
-    <select id="tl"><option value="trim">Couper un passage</option><option value="speed">Accélérer / ralentir</option><option value="silence">Supprimer les blancs (jump-cuts)</option>
-    <option value="music">Ajouter une musique (baisse auto sous la voix)</option><option value="text">Titre animé</option><option value="punch">Zooms d'emphase</option>
-    <option value="voice">Changer la voix (grave, aiguë, radio…)</option><option value="loudnorm">Normaliser le volume</option><option value="logo">Ajouter MON logo / filigrane</option>
-    <option value="burn">Incruster des sous-titres (.srt / .ass)</option><option value="stabilize">Stabiliser</option><option value="thumbnail">Meilleure image de couverture</option></select>
-    <div id="tl_trim" class="tlf"><div class="row"><div><label>Début (s ou mm:ss)</label><input id="tl_start" value="0"></div><div><label>Fin (vide = jusqu'au bout)</label><input id="tl_end"></div></div></div>
-    <div id="tl_speed" class="tlf hide"><label>Facteur (1.25 = plus rapide, 0.8 = plus lent)</label><input id="tl_factor" type="number" step="0.05" value="1.25"></div>
-    <div id="tl_music" class="tlf hide"><label>Fichier musique (à toi / libre de droits)</label><input id="tl_track" type="file" accept="audio/*"><label>Volume</label><input id="tl_vol" type="number" step="0.05" value="0.15"></div>
-    <div id="tl_text" class="tlf hide"><label>Texte</label><input id="tl_txt" maxlength="120"><div class="row"><div><label>Position</label><select id="tl_pos"><option value="top">Haut</option><option value="center">Centre</option><option value="bottom">Bas</option></select></div><div><label>Début (s)</label><input id="tl_tstart" value="0"></div></div></div>
-    <div id="tl_punch" class="tlf hide"><label>Instants des zooms (secondes, séparées par des virgules)</label><input id="tl_at" placeholder="3, 12, 20"></div>
-    <div id="tl_voice" class="tlf hide"><label>Voix</label><select id="tl_preset"><option value="deep">Grave</option><option value="low">Un peu plus grave</option><option value="high">Plus aiguë</option><option value="child">Très aiguë</option><option value="radio">Radio</option><option value="echo">Écho</option><option value="robot">Robot</option></select></div>
-    <div id="tl_logo" class="tlf hide"><label>Image du logo (PNG conseillé)</label><input id="tl_img" type="file" accept="image/*"><div class="row"><div><label>Position</label><select id="tl_lpos"><option value="br">Bas droite</option><option value="bl">Bas gauche</option><option value="tr">Haut droite</option><option value="tl">Haut gauche</option><option value="center">Centre</option></select></div><div><label>Taille (0.05–0.6)</label><input id="tl_scale" type="number" step="0.05" value="0.15"></div></div></div>
-    <div id="tl_burn" class="tlf hide"><label>Fichier de sous-titres</label><input id="tl_subs" type="file" accept=".srt,.ass"></div>
-    <button id="gotl">Appliquer</button>
-    <div class="note">Pour assembler plusieurs vidéos avec transitions : <code>./phenix edit concat a.mp4 b.mp4 -o out.mp4 --xfade fade</code>.</div>
-  </div>
-  <div id="p6" class="hide">
-    <h2 style="margin-top:18px">Réglages &amp; diagnostic</h2>
-    <button id="godoc" class="sec">Vérifier l'installation</button>
-    <button id="gotest" class="sec">Auto-test des fonctions (1 à 3 min)</button>
-    <h2 style="margin-top:18px">Envoi direct sur YouTube</h2>
-    <div class="note" id="ytstate">…</div>
-    <label>Fichier client_secret.json (Google Cloud → Identifiants → ID client OAuth « Application de bureau », API YouTube Data v3 activée, gratuit)</label>
-    <input id="secret" type="file" accept=".json">
-    <div class="note">La première fois, une fenêtre Google s'ouvre pour autoriser l'envoi. Les vidéos partent en « privé » par défaut. Voix de synthèse = déclarée comme contenu modifié/synthétique. TikTok : publication manuelle (pas d'API gratuite fiable).</div>
-  </div>
-  <div id="p3" class="hide">
-    <h2 style="margin-top:18px">2. Améliorer la vidéo</h2>
-    <div class="note" id="src3">Utilise « Améliorer ce clip » sous un clip produit, ou la vidéo choisie ci-dessus.</div>
-    <div class="chk"><input id="e_clean" type="checkbox" checked>Nettoyer (bruit audio/vidéo, netteté, volume)</div>
-    <label>Arrière-plan (personne face caméra)</label>
-    <select id="e_bg"><option value="">Garder</option><option value="blur">Flou</option><option value="color">Couleur unie</option><option value="image">Image (à téléverser)</option></select>
-    <div class="row"><div><label>Couleur</label><input id="e_col" type="color" value="#0b1f3a"></div>
-    <div><label>Image de fond</label><input id="e_img" type="file" accept="image/*"></div></div>
-    <label>Effets (plusieurs possibles)</label>
-    <div id="fxlist" class="row"></div>
-    <label>Titre animé (3 s)</label><input id="e_title" maxlength="80" placeholder="Optionnel">
-    <div class="chk"><input id="e_mascot" type="checkbox">Mascotte phenix_forever (pulse avec la voix)</div>
-    <div class="row"><div><label>Position mascotte</label><select id="e_mpos"><option value="br">Bas droite</option><option value="bl">Bas gauche</option><option value="tr">Haut droite</option><option value="tl">Haut gauche</option></select></div>
-    <div><label>Sticker / GIF (à toi)</label><input id="e_stk" type="file" accept="image/*"></div></div>
-    <button id="goenh">Améliorer</button>
-    <div class="note">Personnages : seulement ta mascotte, la mascotte fournie ou tes propres images (pas de personnages protégés).</div>
-  </div>
-</section>
-
-<section>
-  <div class="card"><h2>Résultat</h2>
-    <div id="status" class="note">Rien en cours.</div>
-    <pre id="log" class="hide"></pre>
-    <button class="sec hide" id="cancel" style="width:auto">Annuler</button>
-    <div id="clipsbox" class="hide"></div>
-    <div class="grid" id="out"></div>
-    <button class="sec hide" id="pub" style="width:auto">Préparer le dossier de publication (YouTube / TikTok / boost)</button>
-    <div id="pubbox" class="note"></div>
-    <div id="ytbox" class="hide"><label>Envoyer sur YouTube</label>
-      <select id="ytfolder"></select>
-      <select id="ytpriv"><option value="private">Privé (conseillé)</option><option value="unlisted">Non répertorié</option><option value="public">Public</option></select>
-      <button class="sec" id="goyt" style="width:auto">Envoyer</button></div>
-    <div class="note hide" id="ai">⚠ Voix de synthèse : active l'étiquette « contenu généré par IA » à la publication. Vérifie tes droits et relis la traduction.</div>
-  </div>
-  <div class="card" style="margin-top:16px"><h2>Historique</h2><div id="hist" class="note"></div></div>
-</section>
-</main>
-<footer style="text-align:center;color:var(--mut);font-size:12px;padding:18px">Phenix-video · © 2026 Phenix - kcw</footer>
-<script>
-const $=id=>document.getElementById(id);let source="",cur=null,timer=null,kind="clips";
-const enc=p=>String(p).split('/').map(encodeURIComponent).join('/');
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function refreshHealth(){fetch('/api/health').then(r=>r.json()).then(h=>{$('health').textContent=(h.ffmpeg?'FFmpeg ✓':'⚠ FFmpeg introuvable')+' · v'+h.version+' · dossier : '+h.workdir;$('ytstate').textContent=h.youtube_ready?'client_secret.json présent : prêt pour l\'envoi.':'Pas encore de client_secret.json.'})}refreshHealth();
-function tab(n){document.querySelectorAll('.tabs button').forEach((b,i)=>b.classList.toggle('on',i+1==n));kind=['','clips','delogo','enhance','trends','tool','settings'][n];['p1','p2','p3','p4','p5','p6'].forEach((id,i)=>$(id).classList.toggle('hide',n!=i+1));$('srcbox').classList.toggle('hide',n==4||n==6);if(n==6)refreshHealth()}
-tab(1);$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);$('t3').onclick=()=>tab(3);$('t4').onclick=()=>tab(4);$('t5').onclick=()=>tab(5);$('t6').onclick=()=>tab(6);
-const FX={vignette:'Vignette',warm:'Chaud',cool:'Froid',cinema:'Cinéma',vivid:'Éclatant',bw:'Noir & blanc',grain:'Grain',sharpen:'Netteté',glitch:'Glitch',shake:'Tremblement',flash:'Flash',zoomin:'Zoom lent',fade:'Fondu',lowlight:'Éclaircir'};
-$('fxlist').innerHTML=Object.entries(FX).map(([k,v])=>'<label class="chk" style="margin:2px 0"><input type="checkbox" class="fxc" value="'+k+'">'+v+'</label>').join('');
-let enhSrc="";
-function upfile(inp,cb){const f=inp.files[0];if(!f)return;const x=new XMLHttpRequest();x.open('POST','/api/upload?name='+encodeURIComponent(f.name));x.onload=()=>{try{cb(JSON.parse(x.responseText).id)}catch(e){alert('Échec envoi')}};x.send(f)}
-let bgImg="",stkImg="";$('e_img').onchange=()=>upfile($('e_img'),i=>bgImg=i);$('e_stk').onchange=()=>upfile($('e_stk'),i=>stkImg=i);
-$('goenh').onclick=()=>{const o={source:enhSrc||$('url').value.trim()||source,clean:$('e_clean').checked,bg:$('e_bg').value,bg_color:$('e_col').value,bg_image:bgImg,
- effects:[...document.querySelectorAll('.fxc:checked')].map(x=>x.value),title:$('e_title').value,mascot:$('e_mascot').checked,mascot_pos:$('e_mpos').value,sticker:stkImg,quality:'balanced'};
- if(o.bg==='image'&&!bgImg){alert("Choisis l'image de fond.");return}start('enhance',o)};
-$('pub').onclick=async()=>{const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'publish',options:{job:cur}})});const j=await r.json();
- if(j.error){alert(j.error);return}$('pubbox').textContent='Préparation…';const t=setInterval(async()=>{const v=await (await fetch('/api/jobs/'+j.id)).json();
-  if(v.status==='done'){clearInterval(t);poll();ytJob=cur;fillYt(v);$('pubbox').textContent='Dossier prêt : voir les fichiers texte listés ci-dessous (titre, description, hashtags). Dossier : '+'jobs/'+cur+'/out/publish'}
-  else if(v.status==='error'){clearInterval(t);$('pubbox').textContent='Échec : '+v.log.slice(-300)}},1500)};
-$('drop').onclick=()=>$('file').click();
-['dragover','dragenter'].forEach(e=>$('drop').addEventListener(e,ev=>{ev.preventDefault();$('drop').classList.add('on')}));
-['dragleave','drop'].forEach(e=>$('drop').addEventListener(e,ev=>{ev.preventDefault();$('drop').classList.remove('on')}));
-$('drop').addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])upload(ev.dataTransfer.files[0])});
-$('file').onchange=e=>{if(e.target.files[0])upload(e.target.files[0])};
-function upload(f){$('src').textContent='Envoi de '+f.name+'…';const x=new XMLHttpRequest();
- x.open('POST','/api/upload?name='+encodeURIComponent(f.name));
- x.upload.onprogress=e=>{if(e.lengthComputable)$('up').style.width=(100*e.loaded/e.total)+'%'};
- x.onload=()=>{try{const r=JSON.parse(x.responseText);if(r.id){source=r.id;$('url').value='';$('src').textContent='Prêt : '+f.name+' ('+(f.size/1048576).toFixed(1)+' Mo)'}else $('src').textContent=r.error||'Échec'}catch(e){$('src').textContent='Échec'}};
- x.onerror=()=>$('src').textContent='Échec de l\'envoi';x.send(f)}
-function opts(analyse){const o={source:$('url').value.trim()||source,analyse_only:analyse,clips:$('clips').value,aspect:$('aspect').value,
- min:$('min').value,max:$('max').value,short:$('short').checked,tighten:$('tighten').checked,style:$('style').value,quality:$('quality').value,
- translate_to:$('to').value,dub:$('dub').checked,voice:$('voice').value,bg:$('bg').value};return o}
-async function start(k,o){if(!o.source){alert('Ajoute une vidéo ou un lien.');return}
- const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:k,options:o})});const j=await r.json();
- if(j.error){alert(j.error);return}cur=j.id;$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()}
-$('go').onclick=()=>start('clips',opts(false));$('an').onclick=()=>start('clips',opts(true));
-$('godl').onclick=()=>start('delogo',{source:$('url').value.trim()||source,method:$('method').value,areas:[...document.querySelectorAll('.ar:checked')].map(x=>x.value)});
-$('gotr').onclick=async()=>{const o={links:$('tr_links').value,search:$('tr_search').value,theme:$('tr_theme').value,lang:$('tr_lang').value,translate_to:$('tr_to').value,deep:$('tr_deep').checked};
- if(!o.links.trim()&&!o.search.trim()){alert('Colle des liens ou écris une recherche.');return}
- const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'trends',options:o})});const j=await r.json();
- if(j.error){alert(j.error);return}cur=j.id;$('trbox').classList.add('hide');$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()};
-
-const TOOLS=['trim','speed','music','text','punch','voice','logo','burn'];
-$('tl').onchange=()=>{TOOLS.forEach(t=>$('tl_'+t).classList.toggle('hide',$('tl').value!==t))};
-let tlUp={};['tl_track:track','tl_img:image','tl_subs:subs'].forEach(s=>{const [id,k]=s.split(':');$(id).onchange=()=>upfile($(id),i=>tlUp[k]=i)});
-$('gotl').onclick=()=>{const t=$('tl').value;const o={tool:t,source:enhSrc||$('url').value.trim()||source,quality:'balanced',start:$('tl_start').value,end:$('tl_end').value,factor:$('tl_factor').value,
- volume:$('tl_vol').value,track:tlUp.track,text:$('tl_txt').value,position:t==='logo'?$('tl_lpos').value:$('tl_pos').value,punch:'',at:$('tl_at').value,preset:$('tl_preset').value,image:tlUp.image,scale:$('tl_scale').value,subs:tlUp.subs};
- if(t==='text')o.start=$('tl_tstart').value;start('tool',o)};
-$('godoc').onclick=()=>run0('doctor');$('gotest').onclick=()=>run0('selftest');
-async function run0(k){const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:k,options:{}})});const j=await r.json();if(j.error){alert(j.error);return}cur=j.id;$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()}
-$('secret').onchange=async()=>{const f=$('secret').files[0];if(!f)return;const r=await fetch('/api/secret',{method:'POST',body:await f.text()});const j=await r.json().catch(()=>({}));alert(r.ok?'client_secret.json enregistré.':(j.error||'Échec'));refreshHealth()};
-$('goyt').onclick=async()=>{const r=await fetch('/api/jobs',{method:'POST',body:JSON.stringify({kind:'youtube',options:{job:ytJob,folder:$('ytfolder').value,privacy:$('ytpriv').value}})});const j=await r.json();
- if(j.error){alert(j.error);return}cur=j.id;$('log').classList.remove('hide');$('cancel').classList.remove('hide');poll()};
-let ytJob="";
-$('cancel').onclick=()=>fetch('/api/jobs/'+cur+'/cancel',{method:'POST',body:'{}'});
-function poll(){clearTimeout(timer);if(!cur)return;fetch('/api/jobs/'+cur).then(r=>r.json()).then(v=>{render(v);if(v.status==='running'||v.status==='queued')timer=setTimeout(poll,1500);else hist()})}
-function render(v){const lab={queued:'En attente',running:'En cours…',done:'Terminé',error:'Erreur',cancelled:'Annulé'}[v.status]||v.status;
- const errl=(v.log.split('\n').filter(x=>x.startsWith('[erreur]')).pop()||'');
- $('status').innerHTML='<span class="st '+v.status+'">'+lab+'</span> '+esc(v.id)+(v.status==='error'&&errl?'<br><b style="color:var(--er)">'+esc(errl)+'</b>':'');const l=$('log');l.textContent=v.log;l.scrollTop=l.scrollHeight;
- if(v.status!=='running'&&v.status!=='queued')$('cancel').classList.add('hide');
- const mp=v.outputs.filter(o=>o.type==='mp4'),oth=v.outputs.filter(o=>o.type!=='mp4'&&(o.type!=='jpg'||v.kind==='tool'));
- $('out').innerHTML=mp.map(o=>'<div class="v"><video controls preload="metadata" src="/files/'+v.id+'/'+enc(o.path)+'"></video><div class="note">'+esc(o.name)+' · '+(o.size/1048576).toFixed(1)+' Mo</div><a href="/files/'+v.id+'/'+enc(o.path)+'?dl=1">Télécharger</a>'+(v.kind==='clips'?' · <a href="#" class="enh" data-s="job:'+v.id+'/'+enc(o.path)+'">Améliorer ce clip</a>':'')+'</div>').join('')
- +oth.map(o=>'<div class="v"><a href="/files/'+v.id+'/'+enc(o.path)+'" target="_blank">'+esc(o.name)+'</a></div>').join('');
- $('pub').classList.toggle('hide',!(v.status==='done'&&v.kind==='clips'&&mp.length));
- $('ai').classList.toggle('hide',!(mp.length&&v.kind==='clips'&&$('dub').checked&&$('to').value));
- if(v.kind==='trends'&&v.status==='done'){const f=v.outputs.find(o=>o.name==='TENDANCES.md'),g=v.outputs.find(o=>o.name==='idees.md');
-  if(f)Promise.all([fetch('/files/'+v.id+'/'+enc(f.path)).then(r=>r.text()),g?fetch('/files/'+v.id+'/'+enc(g.path)).then(r=>r.text()):''] ).then(([x,y])=>{const b=$('trbox');b.textContent=x+'\n\n'+y;b.classList.remove('hide')})}
- document.querySelectorAll('a.enh').forEach(a=>a.onclick=e=>{e.preventDefault();enhSrc=a.dataset.s.split('/').map(decodeURIComponent).join('/');$('src3').textContent='Clip choisi : '+enhSrc.split('/').pop();tab(3)});
- const cb=$('clipsbox');if(v.clips&&v.clips.clips){cb.classList.remove('hide');
-  cb.innerHTML='<table><tr><th>#</th><th>Début–fin</th><th>Titre / extrait</th></tr>'+v.clips.clips.map(c=>'<tr><td>'+esc(c.id??'')+'</td><td>'+Math.round(c.start)+'–'+Math.round(c.end)+' s</td><td><b>'+esc(c.title||'')+'</b><br>'+esc((c.text||'').slice(0,160))+'</td></tr>').join('')+'</table>'}}
-function hist(){fetch('/api/history').then(r=>r.json()).then(h=>{$('hist').innerHTML=h.length?h.map(x=>'<a href="#" data-id="'+x.id+'" style="color:var(--ac)">'+x.id+'</a> · '+x.status).join('<br>'):'Aucun travail.';
- document.querySelectorAll('#hist a').forEach(a=>a.onclick=e=>{e.preventDefault();cur=a.dataset.id;$('log').classList.remove('hide');poll()})})}
-function fillYt(v){fetch('/api/jobs/'+cur).then(r=>r.json()).then(w=>{const fs=[...new Set(w.outputs.filter(o=>o.path.includes('publish/')&&o.name==='youtube.txt').map(o=>o.path.split('/')[2]))];
- $('ytfolder').innerHTML=fs.map(f=>'<option>'+esc(f)+'</option>').join('');$('ytbox').classList.toggle('hide',!fs.length)})}
-hist();
-if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
-</script></body></html>
-"""
 
 
 def main() -> None:

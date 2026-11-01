@@ -91,6 +91,19 @@ def main() -> int:
     check("analyse de tendances (rapport + idées)", rc == 0 and (work / "tr" / "TENDANCES.md").exists()
           and (work / "tr" / "idees.md").exists(), out[-300:])
 
+    # 4b) analyse de profil, niches, planning (données factices) + modules de comptes
+    prof = [{"url": f"https://ex/{i}", "title": f"Astuce {i} argent #argent", "views": 1000 + 700 * i, "duration": 30 + 5 * (i % 6), "likes": 80 + i, "comments": 5,
+             "hashtags": ["argent"], "timestamp": 1760000000 + i * 86400 * 1.3, "weekday_utc": i % 7, "hour_utc": 8 + (i % 4) * 4, "followers": 5000, "channel": "demo"}
+            for i in range(14)]
+    (work / "prof.json").write_text(_j.dumps({"entries": prof}), encoding="utf-8")
+    rc, out = sh([*PY, str(HERE / "insights.py"), "profile", "-o", str(work / "ins"), "--from-json", str(work / "prof.json")])
+    check("analyse de profil (horaires, jours, planning .ics)", rc == 0 and (work / "ins" / "insights.json").exists()
+          and (work / "ins" / "planning.ics").exists(), out[-300:])
+    rc, out = sh([*PY, "-c", "import sys;sys.path.insert(0,sys.argv[1]);import accounts;"
+                  "cs,n=accounts.plan_chunks(25*1024*1024);assert cs*n<=25*1024*1024<cs*(n+1)+cs and n>=2;"
+                  "assert accounts.status()['tiktok']['connected'] in (True,False)", str(HERE)])
+    check("modules de comptes (TikTok/YouTube)", rc == 0, out[-300:])
+
     # 5) application : démarrage du serveur + outil de montage via l'API + fenêtre (navigateur factice)
     import json as _j2, os as _os, time as _t, urllib.request as _u
     wd = work / "app"

@@ -1,5 +1,13 @@
 # Journal des versions — Phenix-video (© 2026 Phenix - kcw)
 
+## 1.5.0
+
+- **Nouveau logo** : le phénix remplace le « P » (icône application, PWA, installateur, interface).
+- **Interface refondue** (`scripts/web/`, sans ressource externe, hors ligne) : menu latéral (Accueil, Studio, Atelier, Tendances, Profil & niches, Publication, Comptes, Historique, Réglages), thème sombre/clair, notifications, panneau de résultat unique, adaptée au téléphone, accessible au clavier.
+- **Profil & niches** (`insights.py`, `./phenix insights`) : analyse d'un profil public (jours et heures qui performent, durée, accroches, hashtags, cadence, dynamique, niveau de confiance), classement de niches (demande, chances d'un petit compte, fraîcheur), planning de la semaine + fichier agenda `.ics` avec rappel. Ce sont des corrélations, pas une garantie.
+- **Comptes & envoi direct** : connexion YouTube (OAuth officiel) et TikTok (Content Posting API, PKCE) depuis la page Comptes ; envoi en brouillon TikTok ou publication directe (réservée aux apps auditées : sinon « Moi seul »), étiquette « contenu IA » déclarée. Jetons stockés localement (droits 600), actions de compte limitées à l'ordinateur local.
+- `selftest` : + analyse de profil et modules de comptes.
+
 ## 1.4.1
 
 - Mascotte **phenix_forever** : ton image de phénix (fond retiré, `assets/phenix_forever.png`) remplace la mascotte chacal par défaut. Elle respire, pulse, rebondit et rayonne (halo orangé) avec le volume de la voix. `--style chacal` garde l'ancienne mascotte dessinée. L'original est conservé dans `assets/phenix_forever_original.jpg`.

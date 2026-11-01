@@ -9,5 +9,5 @@ piper-tts                   # voix off hors-ligne (voix libres rhasspy/piper-voi
 edge-tts                    # optionnel : voix neuronales gratuites (en ligne, service non officiel)
 # demucs                    # optionnel : retire la voix d'origine en gardant la musique (gros)
 mediapipe                   # remplacement d'arrière-plan (modèle de 250 Ko téléchargé au 1er usage)
-# google-api-python-client    # optionnel : envoi direct sur YouTube (youtube_upload.py)
-# google-auth-oauthlib        # optionnel : idem
+google-api-python-client    # envoi direct sur YouTube (API officielle gratuite)
+google-auth-oauthlib        # idem (connexion du compte)

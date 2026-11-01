@@ -27,6 +27,7 @@ Windows natif : `INSTALLER_WINDOWS.bat` puis `LANCER_WINDOWS.bat`.
 ./phenix enhance out/clip.mp4 -o clip_pro.mp4 --clean --effects cinema --mascot
 ./phenix desktop                 # application PC : fenêtre dédiée (raccourci : ./phenix desktop --install-shortcut)
 ./phenix publish out/            # + BOOST.md (fiche de boost Facebook/TikTok)
+./phenix insights profile https://www.tiktok.com/@moncompte -o analyse   # meilleurs jours/heures, niche, planning .ics
 ./phenix trends https://… https://… -o tendances --theme "l'argent" --translate-to en   # style des vidéos virales
 ```
 Comme skill Claude Code : cloner ce dépôt dans `~/.claude/skills/phenix-video`.
@@ -34,3 +35,10 @@ Comme skill Claude Code : cloner ce dépôt dans `~/.claude/skills/phenix-video`
 ## À respecter
 Ne traiter que des vidéos dont tu détiens les droits ou l'autorisation. Activer l'étiquette « contenu IA » pour les voix de
 synthèse. Aucune garantie de portée sur les plateformes. Détails : `references/platform-guidelines.md`.
+
+
+## Profil, niches, horaires et envoi direct (1.5)
+
+- Page **Profil & niches** : colle le lien d'un profil public → jours/heures qui performent, durée, accroches, hashtags, planning de la semaine et fichier agenda (.ics). « Niches » compare des thèmes (demande, chances pour un petit compte, fraîcheur).
+- Page **Comptes** : connecte YouTube (fichier `client_secret.json` Google, gratuit) et TikTok (app développeur gratuite, Login Kit + Content Posting API). Page **Publication** : envoie le clip préparé en un clic.
+- Limites honnêtes : analyses = corrélations sur données publiques ; sur YouTube les heures ne sont souvent pas publiques ; TikTok n'autorise la publication directe publique qu'aux apps auditées (sinon brouillon ou « Moi seul »).

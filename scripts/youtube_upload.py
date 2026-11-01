@@ -26,8 +26,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from common import StudioError, die  # noqa: E402
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-TOKEN = Path(os.environ.get("PHENIX_VIDEO_CACHE", Path.home() / ".cache" / "phenix-video")) / "youtube_token.json"
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
+CACHE = Path(os.environ.get("PHENIX_VIDEO_CACHE", Path.home() / ".cache" / "phenix-video"))
+TOKEN = CACHE / "youtube_token.json"
+PROFILE = CACHE / "youtube_profile.json"
 
 
 def _service(client_secret: str):
@@ -56,6 +58,28 @@ def _service(client_secret: str):
         except OSError:
             pass
     return build("youtube", "v3", credentials=creds)
+
+
+def whoami(client_secret: str = "client_secret.json") -> dict:
+    """Nom du canal connecté (mis en cache dans youtube_profile.json pour l'interface)."""
+    yt = _service(client_secret)
+    try:
+        res = yt.channels().list(part="snippet,statistics", mine=True).execute()
+    except Exception as exc:  # noqa: BLE001 - jeton ancien sans la portée « lecture seule » : on reconnecte
+        raise StudioError("Lecture du canal impossible : clique sur « Reconnecter » (nouvelle autorisation).") from exc
+    items = res.get("items") or []
+    if not items:
+        raise StudioError("Aucun canal YouTube sur ce compte Google : crée-en un dans YouTube, puis reconnecte.")
+    sn = items[0]["snippet"]
+    info = {"title": sn.get("title"), "id": items[0]["id"], "subscribers": items[0].get("statistics", {}).get("subscriberCount")}
+    PROFILE.parent.mkdir(parents=True, exist_ok=True)
+    PROFILE.write_text(json.dumps(info), encoding="utf-8")
+    return info
+
+
+def logout() -> None:
+    TOKEN.unlink(missing_ok=True)
+    PROFILE.unlink(missing_ok=True)
 
 
 def upload(video: str, title: str, description: str, tags: list[str], *, privacy: str, synthetic: bool,
@@ -92,8 +116,19 @@ def main() -> None:
     ap.add_argument("--no-ai-label", action="store_true", help="NE PAS déclarer de contenu synthétique (déconseillé si voix IA)")
     ap.add_argument("--client-secret", default="client_secret.json")
     ap.add_argument("--lang", default=None)
+    ap.add_argument("--login", action="store_true", help="connecter le compte (ouvre le navigateur) puis afficher le canal")
+    ap.add_argument("--logout", action="store_true", help="oublier la connexion")
     a = ap.parse_args()
     try:
+        if a.logout:
+            logout()
+            print("[ok] compte YouTube déconnecté")
+            return
+        if a.login:
+            logout()  # force une nouvelle autorisation (portées à jour)
+            info = whoami(a.client_secret)
+            print(f"[ok] connecté : {info['title']} ({info['id']})")
+            return
         video, title, desc, tags, synth = a.video, a.title, a.description, [t for t in a.tags.split(",") if t], not a.no_ai_label
         if a.from_folder:
             f = Path(a.from_folder)
